@@ -1,0 +1,21 @@
+Package: VINTAGE
+Type: Package
+Title: Concise Summary of What the Package Does
+Version: 0.1.0
+Date: 2023-05-26
+Author: Zheng Li, Xiang Zhou
+Maintainer: Zheng Li <zlisph@umich.edu>
+Description: More about what it does (maybe more than one line).
+License: GPL (>= 3)
+Encoding: UTF-8
+RoxygenNote: 7.2.3
+Imports: 
+    ACAT (>= 0.91),
+    bigsnpr (>= 1.11.6),
+    CompQuadForm (>= 1.4.3),
+    dplyr (>= 1.1.0),
+    pbmcapply (>= 1.5.1),
+    Rcpp (>= 1.0.10),
+    RcppArmadillo (>= 0.12.0.1.0),
+    susieR (>= 0.12.35)
+LinkingTo: Rcpp, RcppArmadillo
