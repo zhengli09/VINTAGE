@@ -16,6 +16,8 @@
 #' @param window Integer. Buffer region size flanking the gene TSS and TES
 #' @param B Number of simulations to evaluate the simulation-based p-value
 #' @param dofilter Whether to filter out LD mismatched variants
+#' @param pval_cutoff Perform genetic correlation test if the p-value of the
+#'   genetic variance test passed pval_cutoff
 #' @param ncores Number of cores to use
 #' @param maxIterEM Maximum number of iterations for the EM algorithm
 #' @param tolEM Tolerance for likelihood difference to claim convergence
@@ -23,8 +25,8 @@
 #' @param seed Random seed
 run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile, 
   ref_type = c("plink", "vcf"), ambiguity = TRUE, maf = 0.05, 
-  window = 50000, B = 1e7, dofilter = TRUE, ncores = 1,
-  maxIterEM = 1e5, tolEM = 1e-5, save_profile = 1, seed = 0)
+  window = 1e5, B = 1e6, dofilter = TRUE, pval_cutoff = 0.05 / 20000,
+  ncores = 1, maxIterEM = 1e5, tolEM = 1e-5, save_profile = 1, seed = 0)
 {
   set.seed(seed)
   ref_type <- match.arg(ref_type)
@@ -32,10 +34,10 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   # 1.load LD reference panel
   cat("***** Load LD reference data in", ref_type, "format *****\n")
   if(ref_type == "plink"){
-    if(!file.exists(paste0(bigsnpr::sub_bed(refpath), ".bk"))){
+    if(!file.exists(bigsnpr::sub_bed(refpath, ".bk"))){
       rds <- bigsnpr::snp_readBed(refpath)
     } else{
-      rds <- paste0(bigsnpr::sub_bed(refpath), ".rds")
+      rds <- bigsnpr::sub_bed(refpath, ".rds")
     }
     ldref <- bigsnpr::snp_attach(rds)
     ldref$map$marker.ID <- with(ldref$map, paste(chromosome, physical.pos,
@@ -49,7 +51,7 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     rdssub <- bigsnpr::snp_subset(ldref, ind.col = which(idx_keep))
     ldref <- bigsnpr::snp_attach(rdssub)
   }
-  
+
   # 2.handle allele ambiguity
   if(ambiguity){
     cat("***** Exclude strand ambiguous variants (eQTL, GWAS, LD) *****\n")
@@ -59,8 +61,8 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     gwas <- gwas[!amb_idx, ]
     amb_idx <- find_ambiguity(ldref$map$allele1, ldref$map$allele2)
     if(ref_type == "plink"){
-      rdssub <- bigsnpr::snp_subset(ldref, ind.col = which(!amb_idx))
-      ldref <- bigsnpr::snp_attach(rdssub)
+      rdssubsub <- bigsnpr::snp_subset(ldref, ind.col = which(!amb_idx))
+      ldref <- bigsnpr::snp_attach(rdssubsub)
     }
   }
   
@@ -70,7 +72,7 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     "h2_init", "h1", "h2", "r", "sigma1_sq", "sigma2_sq", "null_converged",
     "null_fix_D", "alt_converged", "alt_fix_D", "pval10", "pval91", "pval82",
     "pval73", "pval64", "pval55", "pval46", "pval37", "pval28", "pval19", 
-    "pval01", "VINTAGE", "skat", "time")
+    "pval01", "VINTAGE", "VINTAGEr0", "skat", "time")
   write.table(t(header), file = outfile, col.names = F, row.names = F, 
     quote = F)
   
@@ -127,8 +129,11 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       cat("-- Filter out variants that have LD mismatch\n")
       filter1 <- susieR::kriging_rss(eqtl_matched$zscore, R, n1)
       filter2 <- susieR::kriging_rss(gwas_matched$zscore, R, n2)
-      filter_idx <- filter1$conditional_dist$logLR > 2 | 
-        filter2$conditional_dist$logLR > 2
+      filter_idx <- 
+        filter1$conditional_dist$logLR > 2 | 
+        filter2$conditional_dist$logLR > 2 |
+        abs(filter1$conditional_dist$z_std_diff) > qnorm(0.995) |
+        abs(filter2$conditional_dist$z_std_diff) > qnorm(0.995)
       message(sprintf("%.0f variants filtered due to LD mismatch", 
         sum(filter_idx)))
       eqtl_matched <- eqtl_matched[!filter_idx, ]
@@ -141,24 +146,14 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       return(NULL)
     }
     svdR <- svd(R)
-    s1 <- susieR::estimate_s_rss(eqtl_matched$zscore, R, n1, 
-      method = "null-pseudomle")
-    s2 <- susieR::estimate_s_rss(gwas_matched$zscore, R, n2,
-      method = "null-pseudomle")
+    s1 <- susieR::estimate_s_rss(eqtl_matched$zscore, R, n1)
+    s2 <- susieR::estimate_s_rss(gwas_matched$zscore, R, n2)
     lambdas1 <- (1 - s1) * svdR$d + s1
     lambdas2 <- (1 - s2) * svdR$d + s2
     
     # 3.4.initial values
-    l2_h1 <- apply((svdR$u %*% diag(lambdas1) %*% t(svdR$v))^2, 1, sum)
-    l2_h2 <- apply((svdR$u %*% diag(lambdas2) %*% t(svdR$v))^2, 1, sum)
-    h1_init <- tryCatch({bigsnpr::snp_ldsc(ld_score = l2_h1, ld_size = p, 
-      chi2 = eqtl_matched$zscore_adj^2, sample_size = n1, blocks = NULL)["h2"]
-    }, error = function(e) 0.01)
-    h2_init <- tryCatch({bigsnpr::snp_ldsc(ld_score = l2_h2, ld_size = p, 
-      chi2 = gwas_matched$zscore_adj^2, sample_size = n2, blocks = NULL)["h2"]
-    }, error = function(e) 0.0001)
-    if(h1_init < 0 | h1_init > 1) h1_init <- 0.01
-    if(h2_init < 0 | h2_init > 1) h2_init <- 0.0001
+    h1_init <- init_h2(t(svdR$u) %*% eqtl_matched$zscore_adj, lambdas1, n1)
+    h2_init <- init_h2(t(svdR$u) %*% gwas_matched$zscore_adj, lambdas2, n2)
     init_D <- matrix(c(h1_init, 0, 0, h2_init), 2, 2)
     
     # 3.5.run VINTAGE
@@ -168,30 +163,43 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       save_profile = save_profile, scenario = "null", B = B)
     wts_pvalues <- null$test_h2$pvalues[, 1]
     pvalue <- ACAT::ACAT(wts_pvalues)
+    pvalue <- ifelse(pvalue == 0, 1 / B, pvalue)
     # under the alternative
     alt <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, svdR$u, 
       lambdas1, lambdas2, n, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
       save_profile = save_profile, scenario = "alt", B = B)
+    # hypothesis testing for H0:rho=0
+    if(pvalue < pval_cutoff){
+      nullr0 <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, 
+        svdR$u, lambdas1, lambdas2, n, init_D, maxIterEM = maxIterEM, 
+        tolEM = tolEM, save_profile = save_profile, scenario = "r0", B = B)
+      pvalr0 <- pchisq((nullr0$test_r0$u)^2 / nullr0$test_r0$var_u, 
+        df = 1, lower.tail = F)
+    }
 
-    # 3.6.run SKAT
-    skat <- CompQuadForm::davies(sum(gwas_matched$zscore_adj^2), 
-      lambdas2, acc = 1e-10)$Qq
-    skat <- ifelse(skat > 1, 1, skat)
-    
+    # # 3.6.run SKAT
+    Q <- sum(gwas_matched$zscore_adj^2) / 2
+    W <- svdR$u %*% diag(lambdas2) %*% t(svdR$v)
+    skat <- SKAT::Get_Davies_PVal(Q, W)$p.value
+
     # 3.7.collect output
     out <- c(gene, start, end, window, p, s1, s2, h1_init, h2_init, alt$h1_sq,
       alt$h2_sq, alt$r, alt$sigma1_sq, alt$sigma2_sq, null$is_converged,
       null$is_D_fixed, alt$is_converged, alt$is_D_fixed, wts_pvalues, pvalue,
-      skat, null$elapsed_time)
+      pvalr0, skat, null$elapsed_time)
     write.table(t(out), file = outfile, col.names = F, row.names = F, 
       quote = F, append = T)
   }, mc.cores = ncores)
   
   # 5.remove intermediate files
-  files_remove <- list.files(dirname(refpath), pattern = paste0(
-    bigsnpr::sub_bed(basename(refpath)), ".+rds|", 
-    bigsnpr::sub_bed(basename(refpath)), ".+bk"), full.names = T)
-  file.remove(files_remove)
+  if(ref_type == "plink"){
+    file.remove(rdssub)
+    file.remove(gsub(".rds", ".bk", rdssub))
+    if(ambiguity){
+      file.remove(rdssubsub)
+      file.remove(gsub(".rds", ".bk", rdssubsub))
+    }
+  }
   "done"
 }
 
@@ -243,5 +251,20 @@ match_snp <- function(snpref, sumstat)
     nrow(sumstat) / 4 - nrow(matched), sum(matched$reversed), 
     sum(matched$flipped)))
   matched <- subset(matched, select = -c(reversed, flipped))
+}
+
+#' Find an initial value for the heritability
+init_h2 <- function(Qtz, lambdas, n)
+{
+  neglogllk <- function(h2, Qtz, lambdas, n)
+  {
+    p <- length(Qtz)
+    logllk <- -p * log(h2) - sum(log(n * lambdas + p / h2)) +
+      n * sum(Qtz * Qtz / (n * lambdas + p / h2))
+    -logllk
+  }
+  opt_res <- optim(par = 0, fn = neglogllk, method = "Brent",
+    Qtz = Qtz, lambdas = lambdas, n = n, lower = 0, upper = 1)
+  opt_res$par
 }
 

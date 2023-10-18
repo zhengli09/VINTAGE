@@ -294,16 +294,17 @@ class VINTAGEModel
       vec LS = dat.lambdas1 % EM.S1;
  
       // evaluate information
-      I(0,0) = dat.n(1) * dat.n(1) * accu(dat.lambdas2 % dat.lambdas2) / 2.0;
-      I(0,0) = I(0,0) - dat.n(1) * dat.p * dat.p / 2.0;
+      // note: I and scores have been reconciled to avoid integer overflow
+      I(0,0) = accu(dat.lambdas2 % dat.lambdas2) / 2.0;
+      I(0,0) = I(0,0) - dat.p * dat.p / dat.n(1) / 2.0;
       I(1,1) = accu(dat.lambdas1 % dat.lambdas2) - accu(LLS % dat.lambdas2) * 
         dat.n(0) / paras.sigma_sq(0);
-      I(1,1) = I(1,1) * prod(dat.n) / paras.sigma_sq(0);
+      I(1,1) = I(1,1) / paras.sigma_sq(0);
       
       // evaluate score
-      scores(0) = accu(dat.z2 % dat.z2) * dat.n(1) / 2.0;
+      scores(0) = accu(dat.z2 % dat.z2) / 2.0;
       scores(1) = (accu(dat.z1 % dat.z2) - sqrt(dat.n(0)) * accu(EM.mu_beta1 % 
-        dat.lambdas1 % dat.z2)) * sqrt(prod(dat.n)) / paras.sigma_sq(0);
+        dat.lambdas1 % dat.z2)) / paras.sigma_sq(0);
       scores(0) /= sqrt(I(0,0));
       scores(1) /= sqrt(I(1,1));
 
@@ -314,15 +315,15 @@ class VINTAGEModel
       // simulate test statistics
       int siter = 0;
       mat sim_test_stats(11, testing.B);
-      vec temp = dat.z1 % (1.0 - LS * dat.n(0) / paras.sigma_sq(0)) * 
-        sqrt(prod(dat.n)) / paras.sigma_sq(0);
+      vec temp = dat.z1 % (1.0 - LS * dat.n(0) / paras.sigma_sq(0)) / 
+        paras.sigma_sq(0);
       for(int i = 0; i < testing.B; i++)
       {
         vec sim_scores(2);
         vec sim_z2(dat.p, fill::randn);
         sim_z2 = sim_z2 % sqrt(dat.lambdas2);
         
-        sim_scores(0) = accu(sim_z2 % sim_z2) * dat.n(1) / 2.0;
+        sim_scores(0) = accu(sim_z2 % sim_z2) / 2.0;
         sim_scores(1) =  accu(temp % sim_z2);
         sim_scores(0) /= sqrt(I(0,0));
         sim_scores(1) /= sqrt(I(1,1));
@@ -333,8 +334,8 @@ class VINTAGEModel
       // evaluate p-values using simulated test statistics
       for(int i = 0; i < 11; i++)
       {
-        pvalues(i) = ((double)sum(test_stats(i) < sim_test_stats.row(i)) +
-          1.0) / (testing.B + 1.0);
+        pvalues(i) = (double)sum(test_stats(i) < sim_test_stats.row(i)) / 
+          testing.B;
       }
       
       List output = List::create(
@@ -346,61 +347,15 @@ class VINTAGEModel
       return output;
     }
     
-    // List test_h2_sq()
-    // {
-    //   double u1, u2, var_u1, var_u2, w1, w2;
-    //   double score_pos, score_neg, e, nu, kappa;
-    //   
-    //   u1 = accu(dat.z2 % dat.z2) * dat.n(1) / 2.0;
-    //   u2 = accu(dat.z1 % dat.z2) - sqrt(dat.n(0)) * accu(EM.mu_beta1 % 
-    //     dat.lambdas1 % dat.z2);
-    //   u2 = u2 * sqrt(prod(dat.n)) / paras.sigma_sq(0);
-    // 
-    //   var_u1 = dat.n(1) * dat.n(1) * accu(dat.lambdas2 % dat.lambdas2) / 2.0;
-    //   var_u2 = accu(dat.lambdas1 % dat.lambdas2) - accu(dat.lambdas1 % 
-    //     dat.lambdas2 % dat.lambdas1 % EM.S1) * dat.n(0) / paras.sigma_sq(0);
-    //   var_u2 = var_u2 * prod(dat.n) / paras.sigma_sq(0);
-    // 
-    //   w1 = 1.0 / sqrt(var_u1);
-    //   w2 = 1.0 / sqrt(var_u2);
-    //   e = w1 * dat.n(1) * dat.p / 2.0;
-    //   nu = e * e;
-    //   kappa = 1.0 / e;
-    //   score_pos = (w1 * u1 + w2 * u2) / kappa;
-    //   score_neg = (w1 * u1 - w2 * u2) / kappa;
-    //   
-    //   List output = List::create(
-    //     _["score_pos"] = score_pos,
-    //     _["score_neg"] = score_neg,
-    //     _["nu"] = nu,
-    //     _["u1"] = u1,
-    //     _["u2"] = u2,
-    //     _["w1"] = w1,
-    //     _["w2"] = w2
-    //   );
-    //   return output;
-    // }
-    
     List test_r0()
     {
-      double u;
-      vec eigvals;
-      double var_u;
-      u = accu((dat.z1 - sqrt(dat.n(0)) * dat.lambdas1 % EM.mu_beta1) %
-        (dat.z2 - sqrt(dat.n(1)) * dat.lambdas2 % EM.mu_beta2));
-      u = u * sqrt(prod(dat.n)) / prod(paras.sigma_sq); 
-      eigvals = dat.lambdas1 - dat.lambdas1 % EM.S1 % dat.lambdas1 * dat.n(0) /
-        paras.sigma_sq(0);
-      eigvals %= dat.lambdas2 - dat.lambdas2 % EM.S4 % dat.lambdas2 * dat.n(1) /
-        paras.sigma_sq(1);
-      eigvals *= prod(dat.n) / prod(paras.sigma_sq);
-      var_u = accu(eigvals);
-      eigvals = sqrt(eigvals) / 2.0;
-      eigvals = join_cols(-eigvals, eigvals);
+      double u = accu(dat.z1 % EM.S1 % dat.z2 % EM.S4) / 
+        prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1)* dat.p;
+      double var_u = accu(EM.S1 % EM.S4 % dat.lambdas1 % dat.lambdas2) /
+        prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1);
       
       List output = List::create(
         _["u"] = u,
-        _["eigvals"] = eigvals,
         _["var_u"] = var_u
       );
       return output;
