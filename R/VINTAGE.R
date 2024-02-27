@@ -16,8 +16,8 @@
 #' @param window Integer. Buffer region size flanking the gene TSS and TES
 #' @param B Number of simulations to evaluate the simulation-based p-value
 #' @param dofilter Whether to filter out LD mismatched variants
-#' @param pval_cutoff Perform genetic correlation test if the p-value of the
-#'   genetic variance test passed pval_cutoff
+#' @param pg_cutoff Perform genetic correlation test if the p-value of the
+#'   genetic variance test passed pg_cutoff
 #' @param ncores Number of cores to use
 #' @param maxIterEM Maximum number of iterations for the EM algorithm
 #' @param tolEM Tolerance for likelihood difference to claim convergence
@@ -25,10 +25,9 @@
 #' @param seed Random seed
 run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile, 
   ref_type = c("plink", "vcf"), ambiguity = TRUE, maf = 0.05, 
-  window = 1e5, B = 1e6, dofilter = TRUE, pval_cutoff = 0.05 / 20000,
+  window = 1e5, B = 1e6, dofilter = TRUE, pg_cutoff = 0.05 / 20000,
   ncores = 1, maxIterEM = 1e5, tolEM = 1e-5, save_profile = 1, seed = 0)
 {
-  set.seed(seed)
   ref_type <- match.arg(ref_type)
   
   # 1.load LD reference panel
@@ -77,13 +76,14 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     quote = F)
   
   verbose <- pbmcapply::pbmclapply(1:nrow(gene_info), function(i){
+    set.seed(seed + i)
     gene <- gene_info[i, "gene_id"]
     start <- gene_info[i, "start"]
     end <- gene_info[i, "end"]
     cat("- Handling gene", i, ": ", gene, "(", start, "-", end, ")\n", sep = "")
     
     # 3.1.subset eQTL and GWAS data
-    eqtl_gene <- eqtl[eqtl$gene == gene, ]
+    eqtl_gene <- eqtl[eqtl$gene == gene, , drop = F]
     eqtl_gene <- subset(eqtl_gene, pos >= (start - window) & 
         pos <= (end + window))
     gwas_gene <- subset(gwas, pos >= (start - window) & 
@@ -111,8 +111,8 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     }
     snpref <- subset(snpref, variant %in% gwas_matched$variant)
     snpref <- snpref$variant
-    eqtl_matched <- eqtl_matched[match(snpref, eqtl_matched$variant), ]
-    gwas_matched <- gwas_matched[match(snpref, gwas_matched$variant), ]
+    eqtl_matched <- eqtl_matched[match(snpref, eqtl_matched$variant), , drop = F]
+    gwas_matched <- gwas_matched[match(snpref, gwas_matched$variant), , drop = F]
     n1 <- median(eqtl_matched$N)
     n2 <- median(gwas_matched$N)
     n <- c(n1, n2)
@@ -136,16 +136,22 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
         abs(filter2$conditional_dist$z_std_diff) > qnorm(0.995)
       message(sprintf("%.0f variants filtered due to LD mismatch", 
         sum(filter_idx)))
-      eqtl_matched <- eqtl_matched[!filter_idx, ]
-      gwas_matched <- gwas_matched[!filter_idx, ]
-      R <- R[!filter_idx, !filter_idx]
+      eqtl_matched <- eqtl_matched[!filter_idx, , drop = F]
+      gwas_matched <- gwas_matched[!filter_idx, , drop = F]
+      R <- R[!filter_idx, !filter_idx, drop = F]
     }
     p <- nrow(eqtl_matched)
     if(p == 0){
       warning("No cis-SNPs remianed after LD mismatch filtering")
       return(NULL)
     }
-    svdR <- svd(R)
+    # get around LAPACK error code 1 with eigen
+    svdR <- tryCatch({
+      svd(R)
+    }, error = function(e){
+      eigR <- eigen(R)
+      list(u = eigR$vectors, d = eigR$values, v = eigR$vectors)
+    })
     s1 <- susieR::estimate_s_rss(eqtl_matched$zscore, R, n1)
     s2 <- susieR::estimate_s_rss(gwas_matched$zscore, R, n2)
     lambdas1 <- (1 - s1) * svdR$d + s1
@@ -169,12 +175,14 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       lambdas1, lambdas2, n, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
       save_profile = save_profile, scenario = "alt", B = B)
     # hypothesis testing for H0:rho=0
-    if(pvalue < pval_cutoff){
+    if(pvalue < pg_cutoff){
       nullr0 <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, 
         svdR$u, lambdas1, lambdas2, n, init_D, maxIterEM = maxIterEM, 
         tolEM = tolEM, save_profile = save_profile, scenario = "r0", B = B)
       pvalr0 <- pchisq((nullr0$test_r0$u)^2 / nullr0$test_r0$var_u, 
         df = 1, lower.tail = F)
+    } else{
+      pvalr0 <- NA
     }
 
     # # 3.6.run SKAT
@@ -191,7 +199,7 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       quote = F, append = T)
   }, mc.cores = ncores)
   
-  # 5.remove intermediate files
+  # 4.remove intermediate files
   if(ref_type == "plink"){
     file.remove(rdssub)
     file.remove(gsub(".rds", ".bk", rdssub))

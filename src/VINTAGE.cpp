@@ -167,7 +167,7 @@ class VINTAGEModel
       if(paras.D(0,0) > 1.0 || paras.D(1,1) > 1.0)
       {
         cout << "Warning: Algorithm is unstable likely due to the LD mismatch.";
-        cout << " Fix the D matrix using LDSC estimates" << endl;
+        cout << endl << "Fix the D matrix using initial estimates" << endl;
         control.is_D_fixed = true;
         paras.D = paras.init_D;
       }
@@ -350,7 +350,7 @@ class VINTAGEModel
     List test_r0()
     {
       double u = accu(dat.z1 % EM.S1 % dat.z2 % EM.S4) / 
-        prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1)* dat.p;
+        prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1) * dat.p;
       double var_u = accu(EM.S1 % EM.S4 % dat.lambdas1 % dat.lambdas2) /
         prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1);
       
@@ -370,7 +370,9 @@ class VINTAGEModel
         _["sigma2_sq"] = paras.sigma_sq(1),
         _["logliks"] = profile.logliks.head(profile_iter),
         _["is_D_fixed"] = control.is_D_fixed,
-        _["is_converged"] = control.is_converged
+        _["is_converged"] = control.is_converged,
+        _["mu_beta1"] = EM.mu_beta1,
+        _["S1"] = EM.S1
       );
       if(control.scenario == "alt")
       {
@@ -380,6 +382,8 @@ class VINTAGEModel
       }
       else if(control.scenario == "r0")
       {
+        output.push_back(EM.mu_beta2, "mu_beta2");
+        output.push_back(EM.S4, "S4");
         output.push_front(paras.D(1,1), "h2_sq");
         List testing_r0 = test_r0();
         output.push_back(testing_r0, "test_r0");
