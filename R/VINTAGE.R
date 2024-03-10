@@ -67,11 +67,10 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   
   # 3.analyze one gene at a time
   # 3.0.prepare output file
-  header <- c("gene", "start", "end", "window", "p", "s1", "s2", "h1_init",
-    "h2_init", "h1", "h2", "r", "sigma1_sq", "sigma2_sq", "null_converged",
-    "null_fix_D", "alt_converged", "alt_fix_D", "pval10", "pval91", "pval82",
-    "pval73", "pval64", "pval55", "pval46", "pval37", "pval28", "pval19", 
-    "pval01", "VINTAGE", "VINTAGEr0", "skat", "time")
+  header <- c("gene", "start", "end", "window", "p", "k", "s1", "s2", "h1_init",
+    "h2_init", "h1", "h2", "r", "sigma1_sq", "sigma2_sq", "pval10", "pval91", 
+    "pval82", "pval73", "pval64", "pval55", "pval46", "pval37", "pval28", 
+    "pval19", "pval01", "vin_var_test", "vin_corr_test", "skat", "time")
   write.table(t(header), file = outfile, col.names = F, row.names = F, 
     quote = F)
   
@@ -152,37 +151,37 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       eigR <- eigen(R)
       list(u = eigR$vectors, d = eigR$values, v = eigR$vectors)
     })
+    k <- which.min(abs(cumsum(svdR$d) / sum(svdR$d) - 0.99))
     s1 <- susieR::estimate_s_rss(eqtl_matched$zscore, R, n1)
     s2 <- susieR::estimate_s_rss(gwas_matched$zscore, R, n2)
     lambdas1 <- (1 - s1) * svdR$d + s1
     lambdas2 <- (1 - s2) * svdR$d + s2
     
     # 3.4.initial values
-    h1_init <- init_h2(t(svdR$u) %*% eqtl_matched$zscore_adj, lambdas1, n1)
-    h2_init <- init_h2(t(svdR$u) %*% gwas_matched$zscore_adj, lambdas2, n2)
+    h1_init <- init_h2(t(svdR$u) %*% eqtl_matched$zscore_adj, lambdas1, n1, p, k)
+    h2_init <- init_h2(t(svdR$u) %*% gwas_matched$zscore_adj, lambdas2, n2, p, k)
     init_D <- matrix(c(h1_init, 0, 0, h2_init), 2, 2)
     
     # 3.5.run VINTAGE
     # under the null (sigma_beta2_sq = rho = 0)
-    null <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, svdR$u, 
-      lambdas1, lambdas2, n, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
+    null_g <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, svdR$u, 
+      lambdas1, lambdas2, n, p, k, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
       save_profile = save_profile, scenario = "null", B = B)
-    wts_pvalues <- null$test_h2$pvalues[, 1]
-    pvalue <- ACAT::ACAT(wts_pvalues)
-    pvalue <- ifelse(pvalue == 0, 1 / B, pvalue)
+    pw <- null_g$var_test$pvalues[, 1]
+    pg <- ACAT::ACAT(pw)
+    pg <- ifelse(pg == 0, 1 / B, pg)
     # under the alternative
     alt <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, svdR$u, 
-      lambdas1, lambdas2, n, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
+      lambdas1, lambdas2, n, p, k, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
       save_profile = save_profile, scenario = "alt", B = B)
-    # hypothesis testing for H0:rho=0
-    if(pvalue < pg_cutoff){
-      nullr0 <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, 
-        svdR$u, lambdas1, lambdas2, n, init_D, maxIterEM = maxIterEM, 
+    # hypothesis testing for H0:r=0
+    if(pg < pg_cutoff){
+      null_r <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, 
+        svdR$u, lambdas1, lambdas2, n, p, k, init_D, maxIterEM = maxIterEM, 
         tolEM = tolEM, save_profile = save_profile, scenario = "r0", B = B)
-      pvalr0 <- pchisq((nullr0$test_r0$u)^2 / nullr0$test_r0$var_u, 
-        df = 1, lower.tail = F)
+      pr <- pchisq(null_r$corr_test$Tr, df = 1, lower.tail = F)
     } else{
-      pvalr0 <- NA
+      pr <- NA
     }
 
     # # 3.6.run SKAT
@@ -191,12 +190,13 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     skat <- SKAT::Get_Davies_PVal(Q, W)$p.value
 
     # 3.7.collect output
-    out <- c(gene, start, end, window, p, s1, s2, h1_init, h2_init, alt$h1_sq,
-      alt$h2_sq, alt$r, alt$sigma1_sq, alt$sigma2_sq, null$is_converged,
-      null$is_D_fixed, alt$is_converged, alt$is_D_fixed, wts_pvalues, pvalue,
-      pvalr0, skat, null$elapsed_time)
-    write.table(t(out), file = outfile, col.names = F, row.names = F, 
-      quote = F, append = T)
+    out <- c(gene, start, end, window, p, k, s1, s2, h1_init, h2_init, 
+      alt$h1_sq, alt$h2_sq, alt$r, alt$sigma1_sq, alt$sigma2_sq, pw, 
+      pg, pr, skat, null_g$elapsed_time)
+    if(!null_g$fail & !alt$fail){
+      write.table(t(out), file = outfile, col.names = F, row.names = F, 
+        quote = F, append = T) 
+    }
   }, mc.cores = ncores)
   
   # 4.remove intermediate files
@@ -262,17 +262,19 @@ match_snp <- function(snpref, sumstat)
 }
 
 #' Find an initial value for the heritability
-init_h2 <- function(Qtz, lambdas, n)
+init_h2 <- function(Qtz, lambdas, n, p, k)
 {
-  neglogllk <- function(h2, Qtz, lambdas, n)
+  Qtz <- Qtz[1:k]
+  lambdas <- lambdas[1:k]
+  neglogllk <- function(sigma_beta2_sq, Qtz, lambdas, n, k)
   {
-    p <- length(Qtz)
-    logllk <- -p * log(h2) - sum(log(n * lambdas + p / h2)) +
-      n * sum(Qtz * Qtz / (n * lambdas + p / h2))
+    logllk <- -k * log(sigma_beta2_sq) - 
+      sum(log(n * lambdas + 1.0 / sigma_beta2_sq)) +
+      n * sum(Qtz * Qtz / (n * lambdas + 1.0 / sigma_beta2_sq))
     -logllk
   }
   opt_res <- optim(par = 0, fn = neglogllk, method = "Brent",
-    Qtz = Qtz, lambdas = lambdas, n = n, lower = 0, upper = 1)
-  opt_res$par
+    Qtz = Qtz, lambdas = lambdas, n = n, k = k, lower = 0, upper = 1)
+  opt_res$par * p
 }
 

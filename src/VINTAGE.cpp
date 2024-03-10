@@ -1,7 +1,6 @@
 // Author: Zheng Li
 // Date: 2022-07-11
-// Bivariate linear mixed model that intends
-// to integrate TWAS and SKAT
+// VINTAGE
 
 #define ARMA_64BIT_WORD 1
 #include <RcppArmadillo.h>
@@ -16,20 +15,21 @@ class VINTAGEModel
   private:
     struct Data
     {
-      vec n; // n1 and n2
-      int p;
-      vec z1; // transformed z-scores of eQTL study
-      vec z2; // transformed z-scores of GWAS
-      mat Q; // eigenvectors of the SNP correlation matrix
-      vec lambdas1; // eigenvalues of the SNP correlation matrix in eQTL study
-      vec lambdas2; // eigenvalues of the SNP correlation matrix in GWAS
+      vec n; // sample sizes
+      int p; // number of cis-SNPs
+      int k; // number of eigenvalues used for estimation
+      vec z1; // transformed and PVE-adjusted z-scores in the eQTL study
+      vec z2; // transformed and PVE-adjusted z-scores in the GWAS
+      mat Q; // eigenvectors of the LD matrix
+      vec lambdas1; // eigenvalues of the LD matrix in the eQTL study
+      vec lambdas2; // eigenvalues of the LD matrix in the GWAS
     } dat;
     
     struct Paras
     {
-      mat D; // cov[(beta_1j, beta_2j)']=[h1_sq&rho\\rho&h2_sq]/p
-      mat init_D; // store initial values of D from LDSC
-      vec sigma_sq; // residual variance 
+      mat D; // cov[(beta_1j, beta_2j)']
+      mat init_D; // initial values of D
+      vec sigma_sq; // residual variances
     } paras;
     
     struct PX_EM_Alg
@@ -37,7 +37,7 @@ class VINTAGEModel
       vec mu_beta1;
       vec mu_beta2;
       vec S1, S2, S4; // block elements of Sigma_beta
-      vec alpha; // expanded parameter for faster convergence
+      vec alpha; // expansion parameters 
     } EM;
   
     struct Control
@@ -46,8 +46,7 @@ class VINTAGEModel
       double tolEM;
       int save_profile;
       int max_profile;
-      bool is_converged;
-      bool is_D_fixed; // fix D to be LDSC estimates if it is not within 0-1
+      bool fail;
       string scenario;
     } control;
     
@@ -67,14 +66,16 @@ class VINTAGEModel
   
   public:
     void load_data(const vec &z1, const vec &z2, const mat &Q, 
-      const vec &lambdas1, const vec &lambdas2, const vec &n)
+      const vec &lambdas1, const vec &lambdas2, const vec &n, 
+      const int p, const int k)
     {
-      dat.Q = Q;
-      dat.lambdas1 = lambdas1;
-      dat.lambdas2 = lambdas2;
+      dat.Q = Q.cols(0, k-1);
+      dat.lambdas1 = lambdas1.subvec(0, k-1);
+      dat.lambdas2 = lambdas2.subvec(0, k-1);
       dat.z1 = dat.Q.t() * z1;
       dat.z2 = dat.Q.t() * z2;
-      dat.p = dat.z1.n_elem;
+      dat.p = p;
+      dat.k = k;
       dat.n = n;
     }
     
@@ -88,9 +89,8 @@ class VINTAGEModel
       {
         control.max_profile = control.maxIterEM / control.save_profile + 1;
       }
+      control.fail = false;
       control.scenario = scenario;
-      control.is_converged = false;
-      control.is_D_fixed = false;
     }
     
     void set_testing(const int B)
@@ -113,13 +113,13 @@ class VINTAGEModel
       if(control.scenario == "alt")
       {
         // update Sigma_beta
-        double detD = dat.p / (paras.D(0,0) * paras.D(1,1) - 
+        double detD_inv = 1.0 / (paras.D(0,0) * paras.D(1,1) - 
           paras.D(0,1) * paras.D(1,0));
         vec A1 = dat.n(0) / paras.sigma_sq(0) * dat.lambdas1 + 
-          paras.D(1,1) * detD;
+          paras.D(1,1) * detD_inv;
         vec A4 = dat.n(1) / paras.sigma_sq(1) * dat.lambdas2 + 
-          paras.D(0,0) * detD;
-        double A2 = -paras.D(0,1) * detD;
+          paras.D(0,0) * detD_inv;
+        double A2 = -paras.D(0,1) * detD_inv;
         EM.S1 = 1.0 / (A1 - A2 * A2 / A4);
         EM.S4 = 1.0 / (A4 - A2 * A2 / A1);
         EM.S2 = -A2 * EM.S1 / A4;
@@ -133,46 +133,36 @@ class VINTAGEModel
       else if(control.scenario == "null")
       {
         EM.S1 = 1.0 / (dat.n(0) / paras.sigma_sq(0) * dat.lambdas1 + 
-          dat.p / paras.D(0,0));
+          1.0 / paras.D(0,0));
         EM.mu_beta1 = EM.S1 % dat.z1 * sqrt(dat.n(0)) / paras.sigma_sq(0);
       }
       else if(control.scenario == "r0")
       {
         EM.S1 = 1.0 / (dat.n(0) / paras.sigma_sq(0) * dat.lambdas1 + 
-          dat.p / paras.D(0,0));
+          1.0 / paras.D(0,0));
         EM.mu_beta1 = EM.S1 % dat.z1 * sqrt(dat.n(0)) / paras.sigma_sq(0);
         EM.S4 = 1.0 / (dat.n(1) / paras.sigma_sq(1) * dat.lambdas2 + 
-          dat.p / paras.D(1,1));
+          1.0 / paras.D(1,1));
         EM.mu_beta2 = EM.S4 % dat.z2 * sqrt(dat.n(1)) / paras.sigma_sq(1);
       }
     }
     
     void M_step()
     {
-      // update D
-      if(!control.is_D_fixed)
+      // 1.update D
+      paras.D(0,0) = accu(EM.mu_beta1 % EM.mu_beta1) + accu(EM.S1);
+      if(control.scenario == "r0" || control.scenario == "alt")
       {
-        paras.D(0,0) = accu(EM.mu_beta1 % EM.mu_beta1) + accu(EM.S1);
-        if(control.scenario == "alt")
-        {
-          paras.D(1,1) = accu(EM.mu_beta2 % EM.mu_beta2) + accu(EM.S4);
-          paras.D(0,1) = accu(EM.mu_beta1 % EM.mu_beta2) + accu(EM.S2);
-          paras.D(1,0) = paras.D(0,1); 
-        }
-        else if(control.scenario == "r0")
-        {
-          paras.D(1,1) = accu(EM.mu_beta2 % EM.mu_beta2) + accu(EM.S4);
-        }
+        paras.D(1,1) = accu(EM.mu_beta2 % EM.mu_beta2) + accu(EM.S4);
       }
-      if(paras.D(0,0) > 1.0 || paras.D(1,1) > 1.0)
+      if(control.scenario == "alt")
       {
-        cout << "Warning: Algorithm is unstable likely due to the LD mismatch.";
-        cout << endl << "Fix the D matrix using initial estimates" << endl;
-        control.is_D_fixed = true;
-        paras.D = paras.init_D;
+        paras.D(0,1) = accu(EM.mu_beta1 % EM.mu_beta2) + accu(EM.S2);
+        paras.D(1,0) = paras.D(0,1); 
       }
-      
-      // update expansion parameters alpha1 and alpha2
+      paras.D = paras.D / dat.k;
+
+      // 2.update expansion parameters alpha1 and alpha2
       EM.alpha(0) = accu(EM.mu_beta1 % dat.z1) / sqrt(dat.n(0));
       EM.alpha(0) /= accu(dat.lambdas1 % EM.mu_beta1 % EM.mu_beta1) +
         accu(dat.lambdas1 % EM.S1);
@@ -183,32 +173,38 @@ class VINTAGEModel
           accu(dat.lambdas2 % EM.S4);
       }
       
-      // update sigma1_sq and sigma2_sq
-      paras.sigma_sq(0) = 1 + EM.alpha(0) * EM.alpha(0) * accu(EM.mu_beta1 % 
-        dat.lambdas1 % EM.mu_beta1) - 2 * EM.alpha(0) * accu(EM.mu_beta1 % 
+      // 3.update sigma1_sq and sigma2_sq
+      paras.sigma_sq(0) = 1.0 + EM.alpha(0) * EM.alpha(0) * accu(EM.mu_beta1 % 
+        dat.lambdas1 % EM.mu_beta1) - 2.0 * EM.alpha(0) * accu(EM.mu_beta1 % 
         dat.z1) / sqrt(dat.n(0));
-      paras.sigma_sq(0) = max(0.0, paras.sigma_sq(0));
       paras.sigma_sq(0) += EM.alpha(0) * EM.alpha(0) * 
         accu(EM.S1 % dat.lambdas1);
       if(control.scenario == "alt" || control.scenario == "r0")
       {
-        paras.sigma_sq(1) = 1 + EM.alpha(1) * EM.alpha(1) * accu(EM.mu_beta2 % 
+        paras.sigma_sq(1) = 1.0 + EM.alpha(1) * EM.alpha(1) * accu(EM.mu_beta2 % 
           dat.lambdas2 % EM.mu_beta2) - 2.0 * EM.alpha(1) * accu(EM.mu_beta2 % 
           dat.z2) / sqrt(dat.n(1));
-        paras.sigma_sq(1) = max(0.0, paras.sigma_sq(1));
         paras.sigma_sq(1) += EM.alpha(1) * EM.alpha(1) * 
           accu(EM.S4 % dat.lambdas2);
       }
-      // constrain sigma2_sq to be larger than 0.1
-      paras.sigma_sq.transform([](double x){return (x < 0.1 ? 0.1 : x);});
+      
+      // handle edge cases
+      if((paras.D(0,0) * dat.p > 1.0) || (paras.D(1,1) * dat.p) > 1.0 ||
+        paras.sigma_sq(0) < 0.0 || paras.sigma_sq(0) > 1.0 ||
+        paras.sigma_sq(1) < 0.0 || paras.sigma_sq(1) > 1.0)
+      {
+        control.fail = true;
+        paras.D(0,0) = 0.01 / dat.p;
+        paras.D(1,1) = 0.0004 / dat.p;
+        paras.sigma_sq(0) = 1.0 - paras.D(0,0) * dat.k;
+        paras.sigma_sq(1) = 1.0 - paras.D(1,1) * dat.k;
+        EM.alpha.fill(1.0);
+      }
     }
     
     void reduction_step()
     {
-      if(!control.is_D_fixed)
-      {
-        paras.D = diagmat(EM.alpha) * paras.D * diagmat(EM.alpha);
-      }
+      paras.D = diagmat(EM.alpha) * paras.D * diagmat(EM.alpha);
     }
     
     void update_loglik()
@@ -224,7 +220,7 @@ class VINTAGEModel
       if(control.scenario == "alt")
       {
         log_det(logdet, sign, paras.D);
-        profile.loglik -= dat.p * logdet;
+        profile.loglik -= dat.k * logdet;
         profile.loglik += accu(log(EM.S4 - EM.S2 % EM.S2 / EM.S1)) + 
           accu(log(EM.S1));
         profile.loglik += accu(EM.mu_beta2 % dat.z2) *
@@ -232,12 +228,12 @@ class VINTAGEModel
       }
       else if(control.scenario == "null")
       {
-        profile.loglik -= dat.p * log(paras.D(0,0));
+        profile.loglik -= dat.k * log(paras.D(0,0));
         profile.loglik += accu(log(EM.S1));
       }
       else if(control.scenario == "r0")
       {
-        profile.loglik -= dat.p * (log(paras.D(0,0)) + log(paras.D(1,1)));
+        profile.loglik -= dat.k * (log(paras.D(0,0)) + log(paras.D(1,1)));
         profile.loglik += accu(log(EM.S1)) + accu(log(EM.S4));
         profile.loglik += accu(EM.mu_beta2 % dat.z2) *
           sqrt(dat.n(1)) / paras.sigma_sq(1);
@@ -271,10 +267,9 @@ class VINTAGEModel
         monitor();
         if(((iter+1) % control.save_profile == 0) && profile_iter > 1)
         {
-          if(abs(profile.logliks(profile_iter-1) - 
-            profile.logliks(profile_iter-2)) < control.tolEM)
+          if(control.fail || (abs(profile.logliks(profile_iter-1) - 
+            profile.logliks(profile_iter-2)) < control.tolEM))
           {
-            control.is_converged = true;
             break;
           }
         }
@@ -284,27 +279,22 @@ class VINTAGEModel
       }
     }
     
-    List sim_based_test()
+    List genetic_var_test()
     {
-      cout << "Start simulation-based testing..." << endl;
       vec scores(2), test_stats, pvalues(11);
       mat I(2, 2); // information matrix of theta1 under H0
-      // components
-      vec LLS = dat.lambdas1 % dat.lambdas1 % EM.S1;
-      vec LS = dat.lambdas1 % EM.S1;
- 
+
       // evaluate information
       // note: I and scores have been reconciled to avoid integer overflow
       I(0,0) = accu(dat.lambdas2 % dat.lambdas2) / 2.0;
-      I(0,0) = I(0,0) - dat.p * dat.p / dat.n(1) / 2.0;
-      I(1,1) = accu(dat.lambdas1 % dat.lambdas2) - accu(LLS % dat.lambdas2) * 
-        dat.n(0) / paras.sigma_sq(0);
-      I(1,1) = I(1,1) / paras.sigma_sq(0);
+      I(0,0) = I(0,0) - dat.k * dat.k / dat.n(1) / 2.0;
+      I(1,1) = accu(dat.lambdas1 % EM.S1 % dat.lambdas2) / 
+        paras.sigma_sq(0) / paras.D(0,0);
       
       // evaluate score
       scores(0) = accu(dat.z2 % dat.z2) / 2.0;
-      scores(1) = (accu(dat.z1 % dat.z2) - sqrt(dat.n(0)) * accu(EM.mu_beta1 % 
-        dat.lambdas1 % dat.z2)) / paras.sigma_sq(0);
+      scores(1) = accu(dat.z1 % EM.S1 % dat.z2) / 
+        paras.sigma_sq(0) / paras.D(0,0);
       scores(0) /= sqrt(I(0,0));
       scores(1) /= sqrt(I(1,1));
 
@@ -315,12 +305,11 @@ class VINTAGEModel
       // simulate test statistics
       int siter = 0;
       mat sim_test_stats(11, testing.B);
-      vec temp = dat.z1 % (1.0 - LS * dat.n(0) / paras.sigma_sq(0)) / 
-        paras.sigma_sq(0);
+      vec temp = dat.z1 % EM.S1 / paras.sigma_sq(0) / paras.D(0,0);
       for(int i = 0; i < testing.B; i++)
       {
         vec sim_scores(2);
-        vec sim_z2(dat.p, fill::randn);
+        vec sim_z2(dat.k, fill::randn);
         sim_z2 = sim_z2 % sqrt(dat.lambdas2);
         
         sim_scores(0) = accu(sim_z2 % sim_z2) / 2.0;
@@ -347,16 +336,18 @@ class VINTAGEModel
       return output;
     }
     
-    List test_r0()
+    List genetic_corr_test()
     {
       double u = accu(dat.z1 % EM.S1 % dat.z2 % EM.S4) / 
-        prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1) * dat.p;
-      double var_u = accu(EM.S1 % EM.S4 % dat.lambdas1 % dat.lambdas2) /
         prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1);
+      double var_u = accu(EM.S1 % EM.S4 % dat.lambdas1 % dat.lambdas2) / 
+        prod(paras.sigma_sq) / paras.D(0,0) / paras.D(1,1);
+      double Tr = u * u / var_u;
       
       List output = List::create(
         _["u"] = u,
-        _["var_u"] = var_u
+        _["var_u"] = var_u,
+        _["Tr"] = Tr
       );
       return output;
     }
@@ -369,33 +360,26 @@ class VINTAGEModel
         _["sigma1_sq"] = paras.sigma_sq(0),
         _["sigma2_sq"] = paras.sigma_sq(1),
         _["logliks"] = profile.logliks.head(profile_iter),
-        _["is_D_fixed"] = control.is_D_fixed,
-        _["is_converged"] = control.is_converged,
-        _["mu_beta1"] = EM.mu_beta1,
-        _["S1"] = EM.S1
+        _["fail"] = control.fail
       );
       if(control.scenario == "alt")
       {
         r = paras.D(0,1) / sqrt(paras.D(0,0)) / sqrt(paras.D(1,1));
         output.push_front(r, "r");
-        output.push_front(paras.D(1,1), "h2_sq");
+        output.push_front(paras.D(1,1) * dat.p, "h2_sq");
       }
       else if(control.scenario == "r0")
       {
-        output.push_back(EM.mu_beta2, "mu_beta2");
-        output.push_back(EM.S4, "S4");
-        output.push_front(paras.D(1,1), "h2_sq");
-        List testing_r0 = test_r0();
-        output.push_back(testing_r0, "test_r0");
+        output.push_front(paras.D(1,1) * dat.p, "h2_sq");
+        List corr_test_res = genetic_corr_test();
+        output.push_back(corr_test_res, "corr_test");
       }
-      output.push_front(paras.D(0,0), "h1_sq");
+      output.push_front(paras.D(0,0) * dat.p, "h1_sq");
       
       if(control.scenario == "null")
       {
-        // List testing_h2_sq = test_h2_sq();
-        // output.push_back(testing_h2_sq, "test_h2");
-        List test_h2_sq = sim_based_test();
-        output.push_back(test_h2_sq, "test_h2");
+        List var_test_res = genetic_var_test();
+        output.push_back(var_test_res, "var_test");
       }
       return output;
     }
@@ -405,14 +389,15 @@ class VINTAGEModel
 // [[Rcpp::export]]
 List vintage(const arma::vec &z1, const arma::vec &z2, const arma::mat Q, 
   const arma::vec lambdas1, const arma::vec lambdas2, const arma::vec &n, 
-  const arma::mat init_D, const int maxIterEM, const double tolEM, 
-  const std::string scenario, const int B, const int save_profile = 10)
+  const int p, const int k, const arma::mat init_D, const int maxIterEM, 
+  const double tolEM, const std::string scenario, const int B, 
+  const int save_profile = 1)
 {
   wall_clock timer;
   timer.tic();
   VINTAGEModel model;
   
-  model.load_data(z1, z2, Q, lambdas1, lambdas2, n);
+  model.load_data(z1, z2, Q, lambdas1, lambdas2, n, p, k);
   model.set_control(maxIterEM, tolEM, save_profile, scenario);
   model.set_testing(B);
   model.init_paras(init_D);
