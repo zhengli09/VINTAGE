@@ -196,6 +196,8 @@ class VINTAGEModel
         control.fail = true;
         paras.D(0,0) = 0.01 / dat.p;
         paras.D(1,1) = 0.0004 / dat.p;
+        paras.D(0,1) = 0;
+        paras.D(1,0) = 0;
         paras.sigma_sq(0) = 1.0 - paras.D(0,0) * dat.k;
         paras.sigma_sq(1) = 1.0 - paras.D(1,1) * dat.k;
         EM.alpha.fill(1.0);

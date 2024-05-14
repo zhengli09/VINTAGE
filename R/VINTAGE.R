@@ -1,5 +1,8 @@
 # Author: Zheng Li
 # Date: 2023-05-16
+# VINTAGE: A unified framework integrating gene expression mapping studies 
+# with genome-wide association studies for detecting and deciphering gene-trait 
+# associations
 
 #' Run VINTAGE
 #'
@@ -9,7 +12,7 @@
 #' @param gwas GWAS summary statistics
 #' @param refpath Reference panel for calculating SNP-SNP correlation
 #' @param gene_info Gene annotations
-#' @param outfile Ouput file name
+#' @param outfile Output file name
 #' @param ref_type Format of reference panel
 #' @param ambiguity Whether to filter out strand ambiguous variants
 #' @param maf Filter out variants with minor allele frequency below this value
@@ -24,9 +27,9 @@
 #' @param save_profile Evaluate likelihood 
 #' @param seed Random seed
 run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile, 
-  ref_type = c("plink", "vcf"), ambiguity = TRUE, maf = 0.05, 
-  window = 1e5, B = 1e6, dofilter = TRUE, pg_cutoff = 0.05 / 20000,
-  ncores = 1, maxIterEM = 1e5, tolEM = 1e-5, save_profile = 1, seed = 0)
+  ref_type = c("plink"), ambiguity = TRUE, maf = 0.05, window = 1e5, B = 1e6, 
+  dofilter = TRUE, pg_cutoff = 0.05 / 20000, ncores = 1, maxIterEM = 1e5, 
+  tolEM = 1e-3, save_profile = 1, seed = 0)
 {
   ref_type <- match.arg(ref_type)
   
@@ -67,11 +70,11 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   
   # 3.analyze one gene at a time
   # 3.0.prepare output file
-  header <- c("gene", "start", "end", "window", "p", "k", "s1", "s2", "h1_init",
-    "h2_init", "h1", "h2", "r", "sigma1_sq", "sigma2_sq", "pval10", "pval91", 
-    "pval82", "pval73", "pval64", "pval55", "pval46", "pval37", "pval28", 
-    "pval19", "pval01", "vin_var_test", "vin_corr_test", "skat", "time")
-  write.table(t(header), file = outfile, col.names = F, row.names = F, 
+  header <- c("gene", "start", "end", "window", "p", "k", "s1", "s2", 
+    "h1_init", "h2_init", "h1", "h2", "r", "sigma1_sq", "sigma2_sq",
+    paste0("vin_var_pval", c("00", "01", "02", "03", "04", "05", "06", "07", 
+      "08", "09", "10")), "vin_var_test", "vin_corr_test", "skat", "time")
+  write.table(t(header), file = outfile, col.names = F, row.names = F,
     quote = F)
   
   verbose <- pbmcapply::pbmclapply(1:nrow(gene_info), function(i){
@@ -94,7 +97,8 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     
     # 3.2.merge three datasets (use alleles in refld as reference)
     if(ref_type == "plink"){
-      snpref <- ldref$map[, "marker.ID", drop = F]
+      snpref <- subset(ldref$map, physical.pos >= (start - window) &
+          physical.pos <= (end + window))[, "marker.ID", drop = F]
       colnames(snpref) <- "variant"
     }
     eqtl_matched <- match_snp(snpref, eqtl_gene)
@@ -126,19 +130,18 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     }
     if(dofilter){
       cat("-- Filter out variants that have LD mismatch\n")
-      filter1 <- susieR::kriging_rss(eqtl_matched$zscore, R, n1)
-      filter2 <- susieR::kriging_rss(gwas_matched$zscore, R, n2)
-      filter_idx <- 
-        filter1$conditional_dist$logLR > 2 | 
-        filter2$conditional_dist$logLR > 2 |
-        abs(filter1$conditional_dist$z_std_diff) > qnorm(0.995) |
-        abs(filter2$conditional_dist$z_std_diff) > qnorm(0.995)
+      filter1 <- susieR::kriging_rss(eqtl_matched$zscore, R, n1)$conditional_dist
+      filter2 <- susieR::kriging_rss(gwas_matched$zscore, R, n2)$conditional_dist
+      filter_idx <- filter1$logLR > 2 | filter2$logLR > 2 |
+        abs(filter1$z_std_diff) > qnorm(0.995) | 
+        abs(filter2$z_std_diff) > qnorm(0.995)
       message(sprintf("%.0f variants filtered due to LD mismatch", 
         sum(filter_idx)))
       eqtl_matched <- eqtl_matched[!filter_idx, , drop = F]
       gwas_matched <- gwas_matched[!filter_idx, , drop = F]
       R <- R[!filter_idx, !filter_idx, drop = F]
     }
+    colnames(R) <- rownames(R) <- eqtl_matched$variant
     p <- nrow(eqtl_matched)
     if(p == 0){
       warning("No cis-SNPs remianed after LD mismatch filtering")
@@ -160,7 +163,7 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     # 3.4.initial values
     h1_init <- init_h2(t(svdR$u) %*% eqtl_matched$zscore_adj, lambdas1, n1, p, k)
     h2_init <- init_h2(t(svdR$u) %*% gwas_matched$zscore_adj, lambdas2, n2, p, k)
-    init_D <- matrix(c(h1_init, 0, 0, h2_init), 2, 2)
+    init_D <- matrix(c(h1_init / p, 0, 0, h2_init / p), 2, 2)
     
     # 3.5.run VINTAGE
     # under the null (sigma_beta2_sq = rho = 0)
@@ -170,10 +173,12 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     pw <- null_g$var_test$pvalues[, 1]
     pg <- ACAT::ACAT(pw)
     pg <- ifelse(pg == 0, 1 / B, pg)
+
     # under the alternative
     alt <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, svdR$u, 
       lambdas1, lambdas2, n, p, k, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
       save_profile = save_profile, scenario = "alt", B = B)
+
     # hypothesis testing for H0:r=0
     if(pg < pg_cutoff){
       null_r <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, 
@@ -191,8 +196,8 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
 
     # 3.7.collect output
     out <- c(gene, start, end, window, p, k, s1, s2, h1_init, h2_init, 
-      alt$h1_sq, alt$h2_sq, alt$r, alt$sigma1_sq, alt$sigma2_sq, pw, 
-      pg, pr, skat, null_g$elapsed_time)
+      alt$h1_sq, alt$h2_sq, alt$r, alt$sigma1_sq, alt$sigma2_sq, pw, pg, 
+      pr, skat, null_g$elapsed_time)
     if(!null_g$fail & !alt$fail){
       write.table(t(out), file = outfile, col.names = F, row.names = F, 
         quote = F, append = T) 
@@ -276,5 +281,61 @@ init_h2 <- function(Qtz, lambdas, n, p, k)
   opt_res <- optim(par = 0, fn = neglogllk, method = "Brent",
     Qtz = Qtz, lambdas = lambdas, n = n, k = k, lower = 0, upper = 1)
   opt_res$par * p
+}
+
+#' Run MESuSiE to estimate the number of shared SNP signals
+#' and the number of unique SNP signals
+mesusie <- function(ss_eqtl, ss_gwas, R1, R2, L)
+{
+  ss_eqtl$Beta <- ss_eqtl$Z / sqrt(ss_eqtl$N)
+  ss_gwas$Beta <- ss_gwas$Z / sqrt(ss_gwas$N)
+  ss_eqtl$Se <- 1 / sqrt(ss_eqtl$N)
+  ss_gwas$Se <- 1 / sqrt(ss_gwas$N)
+  ss_list <- list(eqtl = ss_eqtl, gwas = ss_gwas)
+  R_list <- list(eqtl = R1, gwas = R2)
+  mesusie <- MESuSiE::meSuSie_core(R_list, ss_list, L = L)
+  n_causal_eqtl <- sum(mesusie$cs$cs_category == "eqtl")
+  n_causal_gwas <- sum(mesusie$cs$cs_category == "gwas")
+  n_causal_both <- sum(mesusie$cs$cs_category == "eqtl_gwas")
+  out <- c(n_causal_eqtl, n_causal_gwas, n_causal_both)
+}
+
+#' Run TWMR and revTWMR to check for reverse mediation effects
+#' Implementation follows:
+#' https://github.com/eleporcu/TWMR/blob/master/MR.R
+#' https://github.com/eleporcu/revTWMR/blob/main/revTWMR.R
+twmr <- function(ldref, ss1, ss2, do_clump = TRUE, constrain_size = TRUE)
+{
+  stopifnot(all(ss1$variant == ss2$variant))
+  snps <- ss1$variant
+  ss1$beta <- ss1$zscore / sqrt(ss1$N)
+  ss2$beta <- ss2$zscore / sqrt(ss2$N)
+  prop_valid <- NA
+  
+  if(constrain_size){
+    # only use instruments with larger effects on the mediator than on outcome
+    snps_constrain <- which(abs(ss1$beta) > abs(ss2$beta))
+    prop_valid <- mean(abs(ss1$beta) > abs(ss2$beta))
+    if(length(snps_constrain) == 0) return(c(NA, prop_valid))
+    snps <- snps[snps_constrain]
+    ss1 <- ss1[snps_constrain, ]
+    ss2 <- ss2[snps_constrain, ]
+  }
+  if(do_clump){
+    ind.col <- match(snps, ldref$map$marker.ID)
+    ref_gene_path <- bigsnpr::snp_subset(ldref, ind.col = ind.col)
+    ref_gene <- bigsnpr::snp_attach(ref_gene_path)
+    infos.chr <- rep(1, ncol(ref_gene$genotypes))
+    snps_clumped <- bigsnpr::snp_clumping(ref_gene$genotypes, infos.chr, 
+      S = abs(ss1$zscore), thr.r2 = 0.01)
+    file.remove(ref_gene_path)
+    file.remove(gsub(".rds", ".bk", ref_gene_path))
+    if(length(snps_clumped) == 0) return(c(NA, prop_valid))
+    snps <- snps[snps_clumped]
+    ss1 <- ss1[snps_clumped, ]
+    ss2 <- ss2[snps_clumped, ]
+  }
+  alpha <- sum(ss1$beta * ss2$beta) / sum(ss1$beta * ss1$beta)
+  c(alpha, prop_valid)
 }
 
