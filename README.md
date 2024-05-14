@@ -1,0 +1,42 @@
+# VINTAGE
+## A unified framework integrating gene expression mapping studies with genome-wide association studies for detecting and deciphering gene-trait associations
+![scheme](https://github.com/zhengli09/VINTAGE/blob/master/docs/schematic.png)
+<p align="justify"> Integrative analysis of genome-wide association studies 
+(GWAS) with gene expression mapping studies holds the promise to unravel the 
+molecular mechanisms underlying disease etiology. Here, we present VINTAGE, 
+a unified statistical framework for such integrative analysis to identify and 
+decipher gene-trait associations. VINTAGE explicitly quantifies and tests the 
+proportion of genetic effects on a trait potentially mediated through gene 
+expression using a local genetic correlation test, and further leverages such 
+information to guide the integration of gene expression mapping study towards 
+gene association mapping in GWAS through a genetic variance test. The explicit 
+quantification of local genetic correlation in VINTAGE allows its gene 
+association test to unify two seemingly unrelated methods, SKAT and TWAS, into 
+the same analytic framework and include both as special cases, thus achieving 
+robust performance across a range of scenarios.  </p>
+
+## Installation
+VINTAGE is implemented as an R package with underlying efficient C++ code 
+interfaced through Rcpp and RcppArmadillo. VINTAGE depends on a few other R 
+packages Please refer to the package [DESCRIPTION](https://github.com/zhengli09/VINTAGE/blob/master/DESCRIPTION) file 
+for details. Dependent packages are supposed to be automatically installed while 
+installing VINTAGE.
+
+Install the VINTAGE R package maintained in github through the `devtools` package.
+```r
+if(!require(devtools))
+  install.packages(devtools)
+devtools::install_github("zhengli09/VINTAGE")
+library(VINTAGE)
+```
+
+## Citing the work
+If you find the `VINTAGE` package or any of the source code in this repository 
+useful for your work, please cite:
+
+> Li, Z., Gao, B, Zhou, X. VINTAGE: A unified framework integrating gene 
+> expression mapping studies with genome-wide association studies for detecting 
+> and deciphering gene-trait associations
+
+Visit our [group website](https://xiangzhou.github.io/) for more statistical 
+tools on analyzing genetics and genomics data.
