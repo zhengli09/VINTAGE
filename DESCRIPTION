@@ -1,11 +1,24 @@
 Package: VINTAGE
 Type: Package
-Title: Concise Summary of What the Package Does
-Version: 0.1.0
-Date: 2023-05-26
-Author: Zheng Li, Xiang Zhou
-Maintainer: Zheng Li <zlisph@umich.edu>
-Description: More about what it does (maybe more than one line).
+Title: A unified framework integrating gene expression mapping studies with 
+  genome-wide association studies for detecting and deciphering gene-trait 
+  associations
+Version: 0.1.005
+Date: 2024-05-24
+Authors@R: c(
+    person("Zheng", "Li", role = c("aut", "cre"), email = "zlisph@umich.edu"),
+    person("Boran", "Gao", role = "aut"),
+    person("Xiang", "Zhou", role = "aut")
+  )
+Description: VINTAGE assesses the complexity of the gene-trait relationship 
+  from two distinct angles, using two separate statistical tests -- a genetic 
+  variance test that examines the joint effects of multiple SNPs in a gene 
+  region on the trait; and a genetic correlation test that examines the
+  potential mediation effects of gene expression. VINTAGE explicitly quantifies 
+  and tests the proportion of genetic effects on a trait potentially mediated 
+  through gene expression using a local genetic correlation test, and further 
+  leverages such information to guide the integration of gene expression mapping 
+  study towards gene association mapping in GWAS through a genetic variance test.
 License: GPL (>= 3)
 Encoding: UTF-8
 RoxygenNote: 7.2.3

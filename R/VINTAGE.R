@@ -57,11 +57,11 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   # 2.handle allele ambiguity
   if(ambiguity){
     cat("***** Exclude strand ambiguous variants (eQTL, GWAS, LD) *****\n")
-    amb_idx <- find_ambiguity(eqtl$effect_allele, eqtl$other_allele)
+    amb_idx <- .find_ambiguity(eqtl$effect_allele, eqtl$other_allele)
     eqtl <- eqtl[!amb_idx, ]
-    amb_idx <- find_ambiguity(gwas$effect_allele, gwas$other_allele)
+    amb_idx <- .find_ambiguity(gwas$effect_allele, gwas$other_allele)
     gwas <- gwas[!amb_idx, ]
-    amb_idx <- find_ambiguity(ldref$map$allele1, ldref$map$allele2)
+    amb_idx <- .find_ambiguity(ldref$map$allele1, ldref$map$allele2)
     if(ref_type == "plink"){
       rdssubsub <- bigsnpr::snp_subset(ldref, ind.col = which(!amb_idx))
       ldref <- bigsnpr::snp_attach(rdssubsub)
@@ -101,13 +101,13 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
           physical.pos <= (end + window))[, "marker.ID", drop = F]
       colnames(snpref) <- "variant"
     }
-    eqtl_matched <- match_snp(snpref, eqtl_gene)
+    eqtl_matched <- .match_snp(snpref, eqtl_gene)
     if(nrow(eqtl_matched) == 0){
       warning("No cis-SNPs remianed after merging datasets")
       return(NULL)
     }
     snpref <- subset(snpref, variant %in% eqtl_matched$variant)
-    gwas_matched <- match_snp(snpref, gwas_gene)
+    gwas_matched <- .match_snp(snpref, gwas_gene)
     if(nrow(gwas_matched) == 0){
       warning("No cis-SNPs remianed after merging datasets")
       return(NULL)
@@ -161,8 +161,8 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     lambdas2 <- (1 - s2) * svdR$d + s2
     
     # 3.4.initial values
-    h1_init <- init_h2(t(svdR$u) %*% eqtl_matched$zscore_adj, lambdas1, n1, p, k)
-    h2_init <- init_h2(t(svdR$u) %*% gwas_matched$zscore_adj, lambdas2, n2, p, k)
+    h1_init <- .init_h2(t(svdR$u) %*% eqtl_matched$zscore_adj, lambdas1, n1, p, k)
+    h2_init <- .init_h2(t(svdR$u) %*% gwas_matched$zscore_adj, lambdas2, n2, p, k)
     init_D <- matrix(c(h1_init / p, 0, 0, h2_init / p), 2, 2)
     
     # 3.5.run VINTAGE
@@ -216,7 +216,7 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   "done"
 }
 
-find_ambiguity <- function(allele1, allele2)
+.find_ambiguity <- function(allele1, allele2)
 {
   amb_idx <- paste0(allele1, allele2) %in% c("AT", "TA", "CG", "GC")
   message(sprintf("%.0f/%.0f (%.0f%%) ambiguous variants identified",
@@ -224,7 +224,7 @@ find_ambiguity <- function(allele1, allele2)
   amb_idx
 }
 
-flip_strand <- function(allele)
+.flip_strand <- function(allele)
 {
   dplyr::case_when(
     allele == "A" ~ "T",
@@ -235,7 +235,7 @@ flip_strand <- function(allele)
   )
 }
 
-match_snp <- function(snpref, sumstat)
+.match_snp <- function(snpref, sumstat)
 {
   sumstat$reversed <- FALSE
   sumstat$flipped <- FALSE
@@ -252,8 +252,8 @@ match_snp <- function(snpref, sumstat)
   
   # flipped alleles
   snpflip <- sumstat
-  snpflip$effect_allele <- flip_strand(snpflip$effect_allele)
-  snpflip$other_allele <- flip_strand(snpflip$other_allele)
+  snpflip$effect_allele <- .flip_strand(snpflip$effect_allele)
+  snpflip$other_allele <- .flip_strand(snpflip$other_allele)
   snpflip$variant <- with(snpflip, paste(chr, pos, 
     other_allele, effect_allele, sep = ":"))
   snpflip$flipped <- TRUE
@@ -267,7 +267,8 @@ match_snp <- function(snpref, sumstat)
 }
 
 #' Find an initial value for the heritability
-init_h2 <- function(Qtz, lambdas, n, p, k)
+#' @noRd
+.init_h2 <- function(Qtz, lambdas, n, p, k)
 {
   Qtz <- Qtz[1:k]
   lambdas <- lambdas[1:k]
@@ -285,7 +286,8 @@ init_h2 <- function(Qtz, lambdas, n, p, k)
 
 #' Run MESuSiE to estimate the number of shared SNP signals
 #' and the number of unique SNP signals
-mesusie <- function(ss_eqtl, ss_gwas, R1, R2, L)
+#' @noRd
+.mesusie <- function(ss_eqtl, ss_gwas, R1, R2, L)
 {
   ss_eqtl$Beta <- ss_eqtl$Z / sqrt(ss_eqtl$N)
   ss_gwas$Beta <- ss_gwas$Z / sqrt(ss_gwas$N)
@@ -304,7 +306,8 @@ mesusie <- function(ss_eqtl, ss_gwas, R1, R2, L)
 #' Implementation follows:
 #' https://github.com/eleporcu/TWMR/blob/master/MR.R
 #' https://github.com/eleporcu/revTWMR/blob/main/revTWMR.R
-twmr <- function(ldref, ss1, ss2, do_clump = TRUE, constrain_size = TRUE)
+#' @noRd
+.twmr <- function(ldref, ss1, ss2, do_clump = TRUE, constrain_size = TRUE)
 {
   stopifnot(all(ss1$variant == ss2$variant))
   snps <- ss1$variant

@@ -10,15 +10,16 @@ run_vintage(
   refpath,
   gene_info,
   outfile,
-  ref_type = c("plink", "vcf"),
+  ref_type = c("plink"),
   ambiguity = TRUE,
   maf = 0.05,
-  window = 50000,
-  B = 1e+07,
+  window = 1e+05,
+  B = 1e+06,
   dofilter = TRUE,
+  pg_cutoff = 0.05/20000,
   ncores = 1,
   maxIterEM = 1e+05,
-  tolEM = 1e-05,
+  tolEM = 0.001,
   save_profile = 1,
   seed = 0
 )
@@ -32,7 +33,7 @@ run_vintage(
 
 \item{gene_info}{Gene annotations}
 
-\item{outfile}{Ouput file name}
+\item{outfile}{Output file name}
 
 \item{ref_type}{Format of reference panel}
 
@@ -45,6 +46,9 @@ run_vintage(
 \item{B}{Number of simulations to evaluate the simulation-based p-value}
 
 \item{dofilter}{Whether to filter out LD mismatched variants}
+
+\item{pg_cutoff}{Perform genetic correlation test if the p-value of the
+genetic variance test passed pg_cutoff}
 
 \item{ncores}{Number of cores to use}
 
