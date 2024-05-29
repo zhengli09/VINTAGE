@@ -2,7 +2,7 @@
 // Date: 2022-07-11
 // VINTAGE
 
-#define ARMA_64BIT_WORD 1
+// #define ARMA_64BIT_WORD 1
 #include <RcppArmadillo.h>
 using namespace Rcpp;
 using namespace arma;
@@ -48,6 +48,7 @@ class VINTAGEModel
       int max_profile;
       bool fail;
       string scenario;
+      bool debug;
     } control;
     
     struct Testing
@@ -66,7 +67,7 @@ class VINTAGEModel
   
   public:
     void load_data(const vec &z1, const vec &z2, const mat &Q, 
-      const vec &lambdas1, const vec &lambdas2, const vec &n, 
+      const vec &lambdas1, const vec &lambdas2, const vec n, 
       const int p, const int k)
     {
       dat.Q = Q.cols(0, k-1);
@@ -80,7 +81,7 @@ class VINTAGEModel
     }
     
     void set_control(const int maxIterEM, const double tolEM, 
-      const int save_profile, const string scenario)
+      const int save_profile, const string scenario, const bool debug)
     {
       control.maxIterEM = maxIterEM;
       control.tolEM = tolEM;
@@ -91,6 +92,7 @@ class VINTAGEModel
       }
       control.fail = false;
       control.scenario = scenario;
+      control.debug = debug;
     }
     
     void set_testing(const int B)
@@ -266,7 +268,10 @@ class VINTAGEModel
       {
         E_step();
         save_profile();
-        monitor();
+        if(control.debug)
+        {
+          monitor();
+        }
         if(((iter+1) % control.save_profile == 0) && profile_iter > 1)
         {
           if(control.fail || (abs(profile.logliks(profile_iter-1) - 
@@ -305,7 +310,6 @@ class VINTAGEModel
         regspace(0, 0.1, 1) * abs(scores(1));
       
       // simulate test statistics
-      int siter = 0;
       mat sim_test_stats(11, testing.B);
       vec temp = dat.z1 % EM.S1 / paras.sigma_sq(0) / paras.D(0,0);
       for(int i = 0; i < testing.B; i++)
@@ -389,22 +393,22 @@ class VINTAGEModel
 
 
 // [[Rcpp::export]]
-List vintage(const arma::vec &z1, const arma::vec &z2, const arma::mat Q, 
-  const arma::vec lambdas1, const arma::vec lambdas2, const arma::vec &n, 
-  const int p, const int k, const arma::mat init_D, const int maxIterEM, 
+List vintage(const arma::vec &z1, const arma::vec &z2, const arma::mat &Q, 
+  const arma::vec &lambdas1, const arma::vec &lambdas2, const arma::vec n, 
+  const int p, const int k, const arma::mat &init_D, const int maxIterEM, 
   const double tolEM, const std::string scenario, const int B, 
-  const int save_profile = 1)
+  const int save_profile, const bool debug)
 {
   wall_clock timer;
   timer.tic();
   VINTAGEModel model;
-  
+
   model.load_data(z1, z2, Q, lambdas1, lambdas2, n, p, k);
-  model.set_control(maxIterEM, tolEM, save_profile, scenario);
+  model.set_control(maxIterEM, tolEM, save_profile, scenario, debug);
   model.set_testing(B);
   model.init_paras(init_D);
   model.run();
-  
+
   List output = model.get_output();
   double elapsed = timer.toc();
   output.push_back(elapsed, "elapsed_time");

@@ -3,7 +3,7 @@ Type: Package
 Title: A unified framework integrating gene expression mapping studies with 
   genome-wide association studies for detecting and deciphering gene-trait 
   associations
-Version: 0.1.005
+Version: 0.1.008
 Date: 2024-05-24
 Authors@R: c(
     person("Zheng", "Li", role = c("aut", "cre"), email = "zlisph@umich.edu"),
@@ -24,11 +24,11 @@ Encoding: UTF-8
 RoxygenNote: 7.2.3
 Imports: 
     ACAT (>= 0.91),
-    bigsnpr (>= 1.11.6),
+    bigsnpr (>= 1.12.2),
     CompQuadForm (>= 1.4.3),
-    dplyr (>= 1.1.0),
-    pbmcapply (>= 1.5.1),
-    Rcpp (>= 1.0.10),
-    RcppArmadillo (>= 0.12.0.1.0),
+    dplyr (>= 1.1.4),
+    parallel (>= 4.4.0),
+    Rcpp (>= 1.0.12),
+    RcppArmadillo (>= 0.12.8.3.0),
     susieR (>= 0.12.35)
 LinkingTo: Rcpp, RcppArmadillo

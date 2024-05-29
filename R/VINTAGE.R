@@ -1,35 +1,79 @@
 # Author: Zheng Li
 # Date: 2023-05-16
-# VINTAGE: A unified framework integrating gene expression mapping studies 
-# with genome-wide association studies for detecting and deciphering gene-trait 
-# associations
 
 #' Run VINTAGE
 #'
-#' VINTAGE analyzes genes on one chromosome at a time
+#' Perform gene-wise genetic variance tests and gene-wise genetic correlation 
+#' tests for genes on one chromosome.
 #' 
-#' @param eqtl eQTL summary statistics
-#' @param gwas GWAS summary statistics
-#' @param refpath Reference panel for calculating SNP-SNP correlation
-#' @param gene_info Gene annotations
-#' @param outfile Output file name
-#' @param ref_type Format of reference panel
-#' @param ambiguity Whether to filter out strand ambiguous variants
-#' @param maf Filter out variants with minor allele frequency below this value
-#' @param window Integer. Buffer region size flanking the gene TSS and TES
-#' @param B Number of simulations to evaluate the simulation-based p-value
-#' @param dofilter Whether to filter out LD mismatched variants
-#' @param pg_cutoff Perform genetic correlation test if the p-value of the
-#'   genetic variance test passed pg_cutoff
-#' @param ncores Number of cores to use
-#' @param maxIterEM Maximum number of iterations for the EM algorithm
-#' @param tolEM Tolerance for likelihood difference to claim convergence
-#' @param save_profile Evaluate likelihood 
-#' @param seed Random seed
+#' @param eqtl data.frame. eQTL summary statistics that minimally should contain
+#'   the gene id, variant id, effect allele, other allele, z scores, and sample size.
+#' @param gwas data.frame. GWAS summary statistics that minimally should contain
+#'   the variant id, effect allele, other allele, z scores, and sample size.
+#' @param refpath character. Path to an LD reference panel for calculating the 
+#'   SNP-SNP correlations. If the reference panel is in plink format, please 
+#'   specify the path to the ".bed" file.
+#' @param gene_info data.frame. Gene annotations that minimally should contain
+#'   the id, transcription start site (TSS), and transcription end site (TES) of
+#'   each gene.
+#' @param outfile character. Path to an output file.
+#' @param ref_type character. Format of the LD reference panel file. As of 
+#'   May 28, 2024, VINTAGE only supports plink file format.
+#' @param ambiguity logical. Whether to filter out strand-ambiguous variants.
+#' @param maf numeric. Filter out variants with minor allele frequencies below 
+#'   this threshold in the LD reference panel.
+#' @param window integer. Buffer region size flanking the gene TSS and TES.
+#' @param B integer. Number of simulations/permutations used to evaluate p values
+#'   in the gene-wise genetic variance test.
+#' @param dofilter logical. Whether to filter out LD mis-matched variants
+#'   between the LD reference panel and eQTL/GWAS summary statistics
+#' @param pg_cutoff numeric. Perform gene-wise genetic correlation test if the 
+#'   p value of the gene-wise genetic variance test passed this threshold.
+#' @param ncores integer. Number of CPU cores to use.
+#' @param maxIterEM integer. Maximum number of iterations for the EM algorithm.
+#' @param tolEM numeric. Tolerance for likelihood difference to claim convergence.
+#' @param save_profile integer. Evaluate likelihood every "save_profile" iterations.
+#' @param seed integer. Random seed.
+#' @param debug logical. Whether to show intermediate quantities for debugging.
+#' 
+#' @return The function does not have a return value. Instead, it directly 
+#'   writes the results to the specified output file. The results consist of
+#'   the following information for each gene:
+#' \item{gene}{Gene id.}
+#' \item{start}{Genomic position of gene TSS.}
+#' \item{end}{Genomic position of gene TES.}
+#' \item{window}{Buffer region size flanking the gene TSS and TES.}
+#' \item{p}{Number of SNPs included in the analysis.}
+#' \item{k}{Number of eigenvectors/eigenvalues used in the analysis.}
+#' \item{s1}{Estimated shrinkage parameter between the LD reference panel and 
+#'   eQTL summary statistics.}
+#' \item{s2}{Estimated shrinkage parameter between the LD reference panel and
+#'   GWAS summary statistics.}
+#' \item{h1_init}{Initial estimate of gene expression cis-heritability.}
+#' \item{h2_init}{Initial estimate of trait cis-heritability.}
+#' \item{h1}{Final estimate of gene expression cis-heritability.}
+#' \item{h2}{Final estimate of trait cis-heritability.}
+#' \item{r}{Local genetic correlation estimate.}
+#' \item{sigma1_sq}{Residual variance estimate from gene expression.}
+#' \item{sigma2_sq}{Residual variance estimate from trait.}
+#' \item{vin_var_pval00-10}{P values from each individual genetic variance test 
+#'   constructed under a particular weight. The weight "00" corresponds to SKAT 
+#'   whereas the weight "10" corresponds to TWAS. The other weights are sequential
+#'   and are in-between these two extreme scenarios.}
+#' \item{vin_var_test}{P value from VINTAGE's gene-wise genetic variance test
+#'   which aggregates p values from all individual tests through the Cauchy
+#'   combination approach.}
+#' \item{vin_corr_test}{P value from VINTAGE's gene-wise genetic correlation
+#'   test. An NA would be reported if the p value from the genetic variance
+#'   test did pass the specified threshold, pg_cutoff.}
+#' \item{skat}{P value from SKAT under an unweighted and linear kernel.}
+#' \item{time}{Elapsed time (secs) for analyzing each gene.}
+#' @export
+#' 
 run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile, 
   ref_type = c("plink"), ambiguity = TRUE, maf = 0.05, window = 1e5, B = 1e6, 
   dofilter = TRUE, pg_cutoff = 0.05 / 20000, ncores = 1, maxIterEM = 1e5, 
-  tolEM = 1e-3, save_profile = 1, seed = 0)
+  tolEM = 1e-3, save_profile = 1, seed = 0, debug = FALSE)
 {
   ref_type <- match.arg(ref_type)
   
@@ -57,10 +101,13 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   # 2.handle allele ambiguity
   if(ambiguity){
     cat("***** Exclude strand ambiguous variants (eQTL, GWAS, LD) *****\n")
+    cat("(eQTL) ")
     amb_idx <- .find_ambiguity(eqtl$effect_allele, eqtl$other_allele)
     eqtl <- eqtl[!amb_idx, ]
+    cat("(GWAS) ")
     amb_idx <- .find_ambiguity(gwas$effect_allele, gwas$other_allele)
     gwas <- gwas[!amb_idx, ]
+    cat("(LD) ")
     amb_idx <- .find_ambiguity(ldref$map$allele1, ldref$map$allele2)
     if(ref_type == "plink"){
       rdssubsub <- bigsnpr::snp_subset(ldref, ind.col = which(!amb_idx))
@@ -77,12 +124,14 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   write.table(t(header), file = outfile, col.names = F, row.names = F,
     quote = F)
   
-  verbose <- pbmcapply::pbmclapply(1:nrow(gene_info), function(i){
+  verbose <- parallel::mclapply(1:nrow(gene_info), function(i){
+    start_time <- Sys.time()
     set.seed(seed + i)
     gene <- gene_info[i, "gene_id"]
     start <- gene_info[i, "start"]
     end <- gene_info[i, "end"]
-    cat("- Handling gene", i, ": ", gene, "(", start, "-", end, ")\n", sep = "")
+    cat("(", i, "/", nrow(gene_info), ") Handling gene: ", gene, " (", start, 
+      "-", end, ")\n", sep = "")
     
     # 3.1.subset eQTL and GWAS data
     eqtl_gene <- eqtl[eqtl$gene == gene, , drop = F]
@@ -96,6 +145,7 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     }
     
     # 3.2.merge three datasets (use alleles in refld as reference)
+    cat("  - Merge three datasets (LD, eQTL, and GWAS)\n")
     if(ref_type == "plink"){
       snpref <- subset(ldref$map, physical.pos >= (start - window) &
           physical.pos <= (end + window))[, "marker.ID", drop = F]
@@ -129,14 +179,14 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       R <- cor(ldref$genotypes[, match(snpref, ldref$map$marker.ID), drop = F])
     }
     if(dofilter){
-      cat("-- Filter out variants that have LD mismatch\n")
+      cat("  - Filter out variants that have LD mismatch\n")
       filter1 <- susieR::kriging_rss(eqtl_matched$zscore, R, n1)$conditional_dist
       filter2 <- susieR::kriging_rss(gwas_matched$zscore, R, n2)$conditional_dist
       filter_idx <- filter1$logLR > 2 | filter2$logLR > 2 |
         abs(filter1$z_std_diff) > qnorm(0.995) | 
         abs(filter2$z_std_diff) > qnorm(0.995)
-      message(sprintf("%.0f variants filtered due to LD mismatch", 
-        sum(filter_idx)))
+      message(sprintf("    %.0f%% variants filtered due to LD mismatch", 
+        signif(mean(filter_idx), digits = 4) * 100))
       eqtl_matched <- eqtl_matched[!filter_idx, , drop = F]
       gwas_matched <- gwas_matched[!filter_idx, , drop = F]
       R <- R[!filter_idx, !filter_idx, drop = F]
@@ -167,23 +217,26 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     
     # 3.5.run VINTAGE
     # under the null (sigma_beta2_sq = rho = 0)
-    null_g <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, svdR$u, 
-      lambdas1, lambdas2, n, p, k, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
-      save_profile = save_profile, scenario = "null", B = B)
+    null_g <- vintage(z1 = eqtl_matched$zscore_adj, z2 = gwas_matched$zscore_adj, 
+      Q = svdR$u, lambdas1 = lambdas1, lambdas2 = lambdas2, n = n, p = p, k = k, 
+      init_D = init_D, maxIterEM = maxIterEM, tolEM = tolEM, scenario = "null", 
+      B = B, save_profile = save_profile, debug = debug)
     pw <- null_g$var_test$pvalues[, 1]
     pg <- ACAT::ACAT(pw)
     pg <- ifelse(pg == 0, 1 / B, pg)
 
     # under the alternative
-    alt <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, svdR$u, 
-      lambdas1, lambdas2, n, p, k, init_D, maxIterEM = maxIterEM, tolEM = tolEM, 
-      save_profile = save_profile, scenario = "alt", B = B)
+    alt <- vintage(z1 = eqtl_matched$zscore_adj, z2 = gwas_matched$zscore_adj, 
+      Q = svdR$u, lambdas1 = lambdas1, lambdas2 = lambdas2, n = n, p = p, k = k, 
+      init_D = init_D, maxIterEM = maxIterEM, tolEM = tolEM, scenario = "alt", 
+      B = B, save_profile = save_profile, debug = debug)
 
     # hypothesis testing for H0:r=0
     if(pg < pg_cutoff){
-      null_r <- vintage(eqtl_matched$zscore_adj, gwas_matched$zscore_adj, 
-        svdR$u, lambdas1, lambdas2, n, p, k, init_D, maxIterEM = maxIterEM, 
-        tolEM = tolEM, save_profile = save_profile, scenario = "r0", B = B)
+      null_r <- vintage(z1 = eqtl_matched$zscore_adj, z2 = gwas_matched$zscore_adj, 
+        Q = svdR$u, lambdas1 = lambdas1, lambdas2 = lambdas2, n = n, p = p, k = k, 
+        init_D = init_D, maxIterEM = maxIterEM, tolEM = tolEM, scenario = "r0", 
+        B = B, save_profile = save_profile, debug = debug)
       pr <- pchisq(null_r$corr_test$Tr, df = 1, lower.tail = F)
     } else{
       pr <- NA
@@ -195,9 +248,11 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     skat <- SKAT::Get_Davies_PVal(Q, W)$p.value
 
     # 3.7.collect output
+    end_time <- Sys.time()
+    elapsed_time <- as.double(end_time-start_time, units = "secs")
     out <- c(gene, start, end, window, p, k, s1, s2, h1_init, h2_init, 
       alt$h1_sq, alt$h2_sq, alt$r, alt$sigma1_sq, alt$sigma2_sq, pw, pg, 
-      pr, skat, null_g$elapsed_time)
+      pr, skat, elapsed_time)
     if(!null_g$fail & !alt$fail){
       write.table(t(out), file = outfile, col.names = F, row.names = F, 
         quote = F, append = T) 
@@ -213,7 +268,9 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       file.remove(gsub(".rds", ".bk", rdssubsub))
     }
   }
-  "done"
+  
+  # "done"
+  return(invisible(NULL))
 }
 
 .find_ambiguity <- function(allele1, allele2)
@@ -260,9 +317,9 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   sumstat <- rbind(sumstat, snpflip)
   
   matched <- merge(sumstat, snpref, by = "variant")
-  message(sprintf("%.0f variants excluded, %.0f reversed, and %.0f flipped",
-    nrow(sumstat) / 4 - nrow(matched), sum(matched$reversed), 
-    sum(matched$flipped)))
+  # message(sprintf("%.0f variants excluded, %.0f reversed, and %.0f flipped",
+  #   nrow(sumstat) / 4 - nrow(matched), sum(matched$reversed), 
+  #   sum(matched$flipped)))
   matched <- subset(matched, select = -c(reversed, flipped))
 }
 
@@ -282,63 +339,5 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
   opt_res <- optim(par = 0, fn = neglogllk, method = "Brent",
     Qtz = Qtz, lambdas = lambdas, n = n, k = k, lower = 0, upper = 1)
   opt_res$par * p
-}
-
-#' Run MESuSiE to estimate the number of shared SNP signals
-#' and the number of unique SNP signals
-#' @noRd
-.mesusie <- function(ss_eqtl, ss_gwas, R1, R2, L)
-{
-  ss_eqtl$Beta <- ss_eqtl$Z / sqrt(ss_eqtl$N)
-  ss_gwas$Beta <- ss_gwas$Z / sqrt(ss_gwas$N)
-  ss_eqtl$Se <- 1 / sqrt(ss_eqtl$N)
-  ss_gwas$Se <- 1 / sqrt(ss_gwas$N)
-  ss_list <- list(eqtl = ss_eqtl, gwas = ss_gwas)
-  R_list <- list(eqtl = R1, gwas = R2)
-  mesusie <- MESuSiE::meSuSie_core(R_list, ss_list, L = L)
-  n_causal_eqtl <- sum(mesusie$cs$cs_category == "eqtl")
-  n_causal_gwas <- sum(mesusie$cs$cs_category == "gwas")
-  n_causal_both <- sum(mesusie$cs$cs_category == "eqtl_gwas")
-  out <- c(n_causal_eqtl, n_causal_gwas, n_causal_both)
-}
-
-#' Run TWMR and revTWMR to check for reverse mediation effects
-#' Implementation follows:
-#' https://github.com/eleporcu/TWMR/blob/master/MR.R
-#' https://github.com/eleporcu/revTWMR/blob/main/revTWMR.R
-#' @noRd
-.twmr <- function(ldref, ss1, ss2, do_clump = TRUE, constrain_size = TRUE)
-{
-  stopifnot(all(ss1$variant == ss2$variant))
-  snps <- ss1$variant
-  ss1$beta <- ss1$zscore / sqrt(ss1$N)
-  ss2$beta <- ss2$zscore / sqrt(ss2$N)
-  prop_valid <- NA
-  
-  if(constrain_size){
-    # only use instruments with larger effects on the mediator than on outcome
-    snps_constrain <- which(abs(ss1$beta) > abs(ss2$beta))
-    prop_valid <- mean(abs(ss1$beta) > abs(ss2$beta))
-    if(length(snps_constrain) == 0) return(c(NA, prop_valid))
-    snps <- snps[snps_constrain]
-    ss1 <- ss1[snps_constrain, ]
-    ss2 <- ss2[snps_constrain, ]
-  }
-  if(do_clump){
-    ind.col <- match(snps, ldref$map$marker.ID)
-    ref_gene_path <- bigsnpr::snp_subset(ldref, ind.col = ind.col)
-    ref_gene <- bigsnpr::snp_attach(ref_gene_path)
-    infos.chr <- rep(1, ncol(ref_gene$genotypes))
-    snps_clumped <- bigsnpr::snp_clumping(ref_gene$genotypes, infos.chr, 
-      S = abs(ss1$zscore), thr.r2 = 0.01)
-    file.remove(ref_gene_path)
-    file.remove(gsub(".rds", ".bk", ref_gene_path))
-    if(length(snps_clumped) == 0) return(c(NA, prop_valid))
-    snps <- snps[snps_clumped]
-    ss1 <- ss1[snps_clumped, ]
-    ss2 <- ss2[snps_clumped, ]
-  }
-  alpha <- sum(ss1$beta * ss2$beta) / sum(ss1$beta * ss1$beta)
-  c(alpha, prop_valid)
 }
 

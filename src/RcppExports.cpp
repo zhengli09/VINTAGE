@@ -12,32 +12,33 @@ Rcpp::Rostream<false>& Rcpp::Rcerr = Rcpp::Rcpp_cerr_get();
 #endif
 
 // vintage
-List vintage(const arma::vec& z1, const arma::vec& z2, const arma::mat Q, const arma::vec lambdas1, const arma::vec lambdas2, const arma::vec& n, const int p, const int k, const arma::mat init_D, const int maxIterEM, const double tolEM, const std::string scenario, const int B, const int save_profile);
-RcppExport SEXP _VINTAGE_vintage(SEXP z1SEXP, SEXP z2SEXP, SEXP QSEXP, SEXP lambdas1SEXP, SEXP lambdas2SEXP, SEXP nSEXP, SEXP pSEXP, SEXP kSEXP, SEXP init_DSEXP, SEXP maxIterEMSEXP, SEXP tolEMSEXP, SEXP scenarioSEXP, SEXP BSEXP, SEXP save_profileSEXP) {
+List vintage(const arma::vec& z1, const arma::vec& z2, const arma::mat& Q, const arma::vec& lambdas1, const arma::vec& lambdas2, const arma::vec n, const int p, const int k, const arma::mat& init_D, const int maxIterEM, const double tolEM, const std::string scenario, const int B, const int save_profile, const bool debug);
+RcppExport SEXP _VINTAGE_vintage(SEXP z1SEXP, SEXP z2SEXP, SEXP QSEXP, SEXP lambdas1SEXP, SEXP lambdas2SEXP, SEXP nSEXP, SEXP pSEXP, SEXP kSEXP, SEXP init_DSEXP, SEXP maxIterEMSEXP, SEXP tolEMSEXP, SEXP scenarioSEXP, SEXP BSEXP, SEXP save_profileSEXP, SEXP debugSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< const arma::vec& >::type z1(z1SEXP);
     Rcpp::traits::input_parameter< const arma::vec& >::type z2(z2SEXP);
-    Rcpp::traits::input_parameter< const arma::mat >::type Q(QSEXP);
-    Rcpp::traits::input_parameter< const arma::vec >::type lambdas1(lambdas1SEXP);
-    Rcpp::traits::input_parameter< const arma::vec >::type lambdas2(lambdas2SEXP);
-    Rcpp::traits::input_parameter< const arma::vec& >::type n(nSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type Q(QSEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type lambdas1(lambdas1SEXP);
+    Rcpp::traits::input_parameter< const arma::vec& >::type lambdas2(lambdas2SEXP);
+    Rcpp::traits::input_parameter< const arma::vec >::type n(nSEXP);
     Rcpp::traits::input_parameter< const int >::type p(pSEXP);
     Rcpp::traits::input_parameter< const int >::type k(kSEXP);
-    Rcpp::traits::input_parameter< const arma::mat >::type init_D(init_DSEXP);
+    Rcpp::traits::input_parameter< const arma::mat& >::type init_D(init_DSEXP);
     Rcpp::traits::input_parameter< const int >::type maxIterEM(maxIterEMSEXP);
     Rcpp::traits::input_parameter< const double >::type tolEM(tolEMSEXP);
     Rcpp::traits::input_parameter< const std::string >::type scenario(scenarioSEXP);
     Rcpp::traits::input_parameter< const int >::type B(BSEXP);
     Rcpp::traits::input_parameter< const int >::type save_profile(save_profileSEXP);
-    rcpp_result_gen = Rcpp::wrap(vintage(z1, z2, Q, lambdas1, lambdas2, n, p, k, init_D, maxIterEM, tolEM, scenario, B, save_profile));
+    Rcpp::traits::input_parameter< const bool >::type debug(debugSEXP);
+    rcpp_result_gen = Rcpp::wrap(vintage(z1, z2, Q, lambdas1, lambdas2, n, p, k, init_D, maxIterEM, tolEM, scenario, B, save_profile, debug));
     return rcpp_result_gen;
 END_RCPP
 }
 
 static const R_CallMethodDef CallEntries[] = {
-    {"_VINTAGE_vintage", (DL_FUNC) &_VINTAGE_vintage, 14},
+    {"_VINTAGE_vintage", (DL_FUNC) &_VINTAGE_vintage, 15},
     {NULL, NULL, 0}
 };
 

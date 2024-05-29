@@ -1,4 +1,4 @@
-# VINTAGE
+# VINTAGE: Variant-set test INtegrative TWAS for GEne-based analysis
 ## A unified framework integrating gene expression mapping studies with genome-wide association studies for detecting and deciphering gene-trait associations
 ![scheme](https://github.com/zhengli09/VINTAGE/blob/master/docs/schematic.png)
 <p align="justify"> Integrative analysis of genome-wide association studies 
@@ -18,7 +18,7 @@ robust performance across a range of scenarios.  </p>
 ## Installation
 VINTAGE is implemented as an R package with underlying efficient C++ code 
 interfaced through Rcpp and RcppArmadillo. VINTAGE depends on a few other R 
-packages Please refer to the package [DESCRIPTION](https://github.com/zhengli09/VINTAGE/blob/master/DESCRIPTION) file 
+packages. Please refer to the package [DESCRIPTION](https://github.com/zhengli09/VINTAGE/blob/master/DESCRIPTION) file 
 for details. Dependent packages are supposed to be automatically installed while 
 installing VINTAGE.
 
@@ -28,7 +28,12 @@ if(!require(devtools))
   install.packages(devtools)
 devtools::install_github("zhengli09/VINTAGE")
 library(VINTAGE)
+?VINTAGE
+?run_vintage
 ```
+
+## How to use `VINTAGE`
+Check our [vignettes](https://zhengli09.github.io/VINTAGE-Analysis/).
 
 ## Citing the work
 If you find the `VINTAGE` package or any of the source code in this repository 
