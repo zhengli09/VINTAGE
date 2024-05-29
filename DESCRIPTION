@@ -32,3 +32,5 @@ Imports:
     RcppArmadillo (>= 0.12.8.3.0),
     susieR (>= 0.12.35)
 LinkingTo: Rcpp, RcppArmadillo
+Remotes:
+    yaowuliu/ACAT
