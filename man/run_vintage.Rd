@@ -27,18 +27,20 @@ run_vintage(
 }
 \arguments{
 \item{eqtl}{data.frame. eQTL summary statistics that minimally should contain
-the gene id, variant id, effect allele, other allele, z scores, and sample size.}
+the gene id, variant id, variant chromosome, variant genomic position, 
+effect allele, other allele, z scores, and sample size.}
 
 \item{gwas}{data.frame. GWAS summary statistics that minimally should contain
-the variant id, effect allele, other allele, z scores, and sample size.}
+the variant id, variant chromosome, variant genomic position, effect allele, 
+other allele, z scores, and sample size.}
 
 \item{refpath}{character. Path to an LD reference panel for calculating the 
 SNP-SNP correlations. If the reference panel is in plink format, please 
 specify the path to the ".bed" file.}
 
 \item{gene_info}{data.frame. Gene annotations that minimally should contain
-the id, transcription start site (TSS), and transcription end site (TES) of
-each gene.}
+the id, chromosome, transcription start site (TSS), and transcription end 
+site (TES) of each gene.}
 
 \item{outfile}{character. Path to an output file.}
 

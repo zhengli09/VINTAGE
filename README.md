@@ -33,7 +33,7 @@ library(VINTAGE)
 ```
 
 ## How to use `VINTAGE`
-Check our [vignettes](https://zhengli09.github.io/VINTAGE-Analysis/).
+Check our [vignettes](https://zhengli09.github.io/VINTAGE-analysis/).
 
 ## Citing the work
 If you find the `VINTAGE` package or any of the source code in this repository 

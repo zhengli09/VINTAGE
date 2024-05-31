@@ -7,15 +7,17 @@
 #' tests for genes on one chromosome.
 #' 
 #' @param eqtl data.frame. eQTL summary statistics that minimally should contain
-#'   the gene id, variant id, effect allele, other allele, z scores, and sample size.
+#'   the gene id, variant id, variant chromosome, variant genomic position, 
+#'   effect allele, other allele, z scores, and sample size.
 #' @param gwas data.frame. GWAS summary statistics that minimally should contain
-#'   the variant id, effect allele, other allele, z scores, and sample size.
+#'   the variant id, variant chromosome, variant genomic position, effect allele, 
+#'   other allele, z scores, and sample size.
 #' @param refpath character. Path to an LD reference panel for calculating the 
 #'   SNP-SNP correlations. If the reference panel is in plink format, please 
 #'   specify the path to the ".bed" file.
 #' @param gene_info data.frame. Gene annotations that minimally should contain
-#'   the id, transcription start site (TSS), and transcription end site (TES) of
-#'   each gene.
+#'   the id, chromosome, transcription start site (TSS), and transcription end 
+#'   site (TES) of each gene.
 #' @param outfile character. Path to an output file.
 #' @param ref_type character. Format of the LD reference panel file. As of 
 #'   May 28, 2024, VINTAGE only supports plink file format.
@@ -91,9 +93,9 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
     # filter by minor allele frequency
     mafs <- bigsnpr::snp_MAF(ldref$genotypes)
     idx_keep <- mafs >= maf
-    message(sprintf(paste0("%.0f/%.0f(%.0f%%) variants excluded in LD ",
-      "reference by MAF cutoff"), sum(!idx_keep), nrow(ldref$map), 
-      sum(!idx_keep) / nrow(ldref$map) * 100))
+    # message(sprintf(paste0("%.0f/%.0f(%.0f%%) variants excluded in LD ",
+    #   "reference by MAF cutoff"), sum(!idx_keep), nrow(ldref$map), 
+    #   sum(!idx_keep) / nrow(ldref$map) * 100))
     rdssub <- bigsnpr::snp_subset(ldref, ind.col = which(idx_keep))
     ldref <- bigsnpr::snp_attach(rdssub)
   }
@@ -185,8 +187,8 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
       filter_idx <- filter1$logLR > 2 | filter2$logLR > 2 |
         abs(filter1$z_std_diff) > qnorm(0.995) | 
         abs(filter2$z_std_diff) > qnorm(0.995)
-      message(sprintf("    %.0f%% variants filtered due to LD mismatch", 
-        signif(mean(filter_idx), digits = 4) * 100))
+      # message(sprintf("    %.0f%% variants filtered due to LD mismatch", 
+      #   signif(mean(filter_idx), digits = 4) * 100))
       eqtl_matched <- eqtl_matched[!filter_idx, , drop = F]
       gwas_matched <- gwas_matched[!filter_idx, , drop = F]
       R <- R[!filter_idx, !filter_idx, drop = F]
@@ -276,8 +278,9 @@ run_vintage <- function(eqtl, gwas, refpath, gene_info, outfile,
 .find_ambiguity <- function(allele1, allele2)
 {
   amb_idx <- paste0(allele1, allele2) %in% c("AT", "TA", "CG", "GC")
-  message(sprintf("%.0f/%.0f (%.0f%%) ambiguous variants identified",
-    sum(amb_idx), length(amb_idx), sum(amb_idx) / length(amb_idx) * 100))
+  cat(sprintf("%.0f/%.0f (%.0f%%) ambiguous variants identified",
+    sum(amb_idx), length(amb_idx), sum(amb_idx) / length(amb_idx) * 100),
+    "\n", sep = "")
   amb_idx
 }
 
