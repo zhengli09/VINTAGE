@@ -1,6 +1,6 @@
 # VINTAGE: Variant-set test INtegrative TWAS for GEne-based analysis
 
-## A unified framework integrating gene expression mapping studies with genome-wide association studies for detecting and deciphering gene-trait associations
+## An alternative framework for transcriptome-wide association studies to detect and decipher gene-trait associations
 
 ![scheme](https://github.com/zhengli09/VINTAGE/blob/master/docs/schematic.png)
 
@@ -8,8 +8,8 @@
 
 Integrative analysis of genome-wide association studies (GWAS) with gene
 expression mapping studies holds the promise to unravel the molecular
-mechanisms underlying disease etiology. Here, we present VINTAGE, a
-unified statistical framework for such integrative analysis to identify
+mechanisms underlying disease etiology. Here, we present VINTAGE, an
+alternative statistical framework for such integrative analysis to identify
 and decipher gene-trait associations. VINTAGE explicitly quantifies and
 tests the proportion of genetic effects on a trait potentially mediated
 through gene expression using a local genetic correlation test, and
