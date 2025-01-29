@@ -1,9 +1,3 @@
----
-editor_options: 
-  markdown: 
-    wrap: 72
----
-
 # VINTAGE: Variant-set test INtegrative TWAS for GEne-based analysis
 
 ## A unified framework integrating gene expression mapping studies with genome-wide association studies for detecting and deciphering gene-trait associations
@@ -25,7 +19,12 @@ through a genetic variance test. The explicit quantification of local
 genetic correlation in VINTAGE allows its gene association test to unify
 two seemingly unrelated methods, SKAT and TWAS, into the same analytic
 framework and include both as special cases, thus achieving robust
-performance across a range of scenarios.
+performance across a range of scenarios. The framework of VINTAGE offers
+a clearer understanding of TWAS false signals when gene expression is not
+relevant to SNP-trait associations. VINTAGE also stands out as the only
+effective method in assessing potential gene mediation effects, revealing
+that most genes lack detectable mediation effects, which explains the power
+advantage of VINTAGE and SKAT over TWAS.
 
 </p>
 
