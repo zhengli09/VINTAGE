@@ -63,7 +63,7 @@ repository useful for your work, please cite:
 
 > Li, Z., Gao, B, Zhou, X. VINTAGE: An alternative framework for
 > transcriptome-wide association studies to detect and decipher
-> gene-trait associations.
+> gene-trait associations. [Preprint](https://www.biorxiv.org/content/10.1101/2025.03.14.643391v1.abstract)
 
 Visit our [group website](https://xiangzhou.github.io/) for more
 statistical tools on analyzing genetics and genomics data.
